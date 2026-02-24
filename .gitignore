@@ -1,0 +1,21 @@
+# R
+.Rhistory
+.RData
+.Ruserdata
+*.rds
+
+# RStudio
+.Rproj.user/
+
+# renv
+renv/
+
+# Data (employer proprietary)
+data/
+
+# Results
+results/
+
+# Plots
+*.pdf
+*.png
