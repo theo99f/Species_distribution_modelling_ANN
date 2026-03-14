@@ -13,6 +13,7 @@ library(dplyr)
 library(tidyr)
 library(pROC)
 
+source("Functions.R")
 
 #loading response with included cell numbers of preprocessed development set
 directory <- "data/preprocessed_data/final_data_split/development_set/"
@@ -36,6 +37,7 @@ predictor_names <- names(predictor_stack)
 #get the cell numbers of the training data
 Cells_of_fish_obs_train <- full_response %>%
   select(cell)
+#get the row and column numbers of the whole training data
 RowCol_of_fish_obs_train <-rowColFromCell(predictor_stack,
                                          cell= Cells_of_fish_obs_train$cell)
 colnames(RowCol_of_fish_obs_train) <- c("Row", "Column")
@@ -45,7 +47,10 @@ scaling <- read.csv("data/preprocessed_data/final_data_split/scaling_parameters.
 center_predictors <- scaling[1,]
 sd_predictors <- scaling[2,]
 
+#function to extract the surrounding cells of a single training location for convolution patch
 #
+#Input a spatial raster object, a double (Row, Column) and an integer with the patch side length
+#Outputs a 3 dim array with dimensions Row x Column x predictor (layer)
 get_Patch <- function(Spatrast_object, Row_Col_of_cell, patch_size){
   
   row <- Row_Col_of_cell[1]
@@ -54,92 +59,142 @@ get_Patch <- function(Spatrast_object, Row_Col_of_cell, patch_size){
   margin <- (patch_size-1)/2
   rows <- (row-margin):(row+margin)
   cols <- (col-margin):(col+margin)
-  #get patches cell numbers
+  #get patches cell numbers (ordered byrow)
   patch_cell_numbers <- cellFromRowColCombine(Spatrast_object, rows, cols)
   
   #extract values for patch
   patch_values <- terra::extract(Spatrast_object, patch_cell_numbers)
   
-  a <- sapply(as.list(patch_values), function(x){matrix(nrow= patch_size, ncol = patch_size,byrow = TRUE)}, "array")
-  matrix(patch_values, nrow= patch_size, ncol = patch_size,byrow = TRUE)
-  return(patch_values)
+  #scale the values using mean and standard deviation from the training data cells
+  patch_values_scaled <- lapply(names(patch_values), 
+                                function(x){(patch_values[[x]]-center_predictors[[x]])/sd_predictors[[x]]})
+  names(patch_values_scaled) <- predictor_names
+  
+  #reshape each layer to represent a 2-dim matrix with the cell in the center and simplify to a 3-dim array
+  scaled_patch_array <- sapply(as.list(patch_values_scaled), 
+              function(x){
+                matrix(x,
+                       nrow= patch_size, 
+                       ncol = patch_size,
+                       byrow = TRUE)},
+              simplify = "array")
+  return(scaled_patch_array)
 }
 
 
-#Setting of the patch size that is used for convolution at each location
-patch_size <- 5
+
+
+
+################################################################################
+# create a training data set for convolution with patches of 9x9 grid cells 
+# around each fishing observation
+# NO NEED TO RERUN can be loaded in next section
+patch_size <- 9
 
 #create an empty 4 dimensional array to store the predictor patches of each observation
 #1 dim:observations, 2 dim: predictor, 3 dim: row, 4 dim: column
-predictor <- array(0, dim = c(nrow(RowCol_of_fish_locations), length(predictor_names), patch_size, patch_size))
+cnn_predictor <- array(0, dim = c(nrow(Cells_of_fish_obs_train), 
+                              length(predictor_names), 
+                              patch_size, 
+                              patch_size))
+
+cnn_predictor[1,,,] <- aperm(get_Patch(predictor_stack, 
+                                       RowCol_of_fish_obs_train[1,], 
+                                       patch_size = patch_size),
+                             c(3,1,2))
+
+for (obs in 1:dim(cnn_predictor)[1]) {
+  cnn_predictor[obs,,,] <- aperm(get_Patch(predictor_stack, 
+                                         RowCol_of_fish_obs_train[obs,], 
+                                         patch_size = patch_size),
+                               c(3,1,2))
+}
+
+sum(is.na(cnn_predictor))
+
+#replacing missing values with arbitrarily high negative number
+cnn_predictor <- ifelse(is.na(cnn_predictor), -9999, cnn_predictor)
+
+saveRDS(cnn_predictor, file = "data/preprocessed_data/final_data_split/development_set/cnn_predictors9x9")
+
+################################################################################
+#latest stable cito version 1.1 does not support cnn functionality yet, 
+#thus the development version is set up for cnn
+library(remotes)
+
+# Create a temp library directory for installing cito development version
+dir.create("~/temp_lib", recursive = TRUE)
+
+# Install development cito in the separate library
+remotes::install_github("citoverse/cito", lib = "~/temp_lib")
+
+# Detach the old cito version first
+detach("package:cito", unload = TRUE)
+# Load it separately 
+library(cito, lib.loc = "~/temp_lib")
+
+exists("cnn", where = "package:cito")
+exists("create_architecture", where = "package:cito")
+exists("conv", where = "package:cito")
+
+################################################################################
+
+#reload cnn predictor dataset
+cnn_predictor <- readRDS("data/preprocessed_data/final_data_split/development_set/cnn_predictors9x9")
 
 
 
 
-dim(aperm(Patch_conv_map, c(3,1,2)))
-
-get_Patch(predictor_stack, RowCol_of_fish_obs_train[1,], patch_size = patch_size)
-
-
-#4 dimensional array 1 dim:observations, 2 dim: predictor, 3 dim: row, 4 dim: column
-predictor <- array(0, dim = c(nrow(RowCol_of_fish_locations), length(predictor_names), patch_size, patch_size))
-dimnames(predictor) <- c
-
-pred_obs <- get_Patch(predictor_stack, RowCol_of_fish_locations[1,1], RowCol_of_fish_locations[1,2], patch_size = 7)
-
-
-
-predictor[1,,,] <- aperm(pred_obs, c(3,1,2))
-
-dim(predictor[1,])
-#predictor: array with dimension 3, 4 or 5 for 1D-, 2D- or 3D-convolutions, respectively. 
-#The first dimension are the samples, the second dimension the channels and the third - fifth dimension are the input dimensions
-
-#get row and column number of predictor raster at fishing locations (response)
-Cells_of_fish_locations <- cellFromXY(predictor_stack,coordinates_meters)
-RowCol_of_fish_locations<-rowColFromCell(predictor_stack,
-                                         cell= Cells_of_fish_locations)
-#model to predict species patch-wise
 architecture <- create_architecture(
-  list(
-    conv(),
-    avgPool(),
-    conv(),
-    avgPool(),
-    linear(n_neurons = n_species
-    ),
+                       #15 predictor channels
+    conv(n_kernels = 10,
+         kernel_size = 3,
+         activation = "prelu"),    #
+    conv(n_kernels = 10,
+         kernel_size = 3,
+         activation = "prelu"),
+    linear(n_neurons = 30,
+           activation = "prelu"),
+  
     default_n_neurons = 10,
     default_n_kernels = 10,
     default_kernel_size = list(conv = 3, maxPool = 2, avgPool = 2),
     default_stride = list(conv = 1, maxPool = NULL, avgPool = NULL),
-    default_padding = list(conv = 0, maxPool = 0, avgPool = 0),
+    default_padding = list(conv = 1, maxPool = 0, avgPool = 0),
     default_dilation = list(conv = 1, maxPool = 1),
     default_bias = list(conv = TRUE, linear = TRUE),
-    default_activation = list(conv = "leaky_relu", linear = "relu"),
-    default_normalization = list(conv = FALSE, linear = FALSE),
+    default_normalization = list(conv = TRUE, linear = TRUE),
     default_dropout = list(conv = 0, linear = 0)
-  ))
+  )
 
-?cnn(
-  X,
-  Y = NULL,
+train_pred <- cnn_predictor[cv_indices[[2]]$train,,,]
+train_resp <- train_set_response[cv_indices[[2]]$train,]
+
+cnn_9_test <- cnn(
+  X=train_pred,
+  Y = train_resp,
   architecture,
-  #use binomial for cnn or custom loss function (binary cross-entropy) or mvp with dnn
-  loss = "binomial",
+  #use binomial for cnn or custom loss function (binary cross-entropy) 
+  loss = "mvp",
   optimizer = "adam",
-  lr = 0.01,
+  lr = 0.001,
   alpha = 0.5,
-  lambda = 0,
+  lambda = 0.0001,
   validation = 0.1,
   batchsize = 32L,
-  burnin = 10,
   shuffle = TRUE,
-  epochs = 100,
-  early_stopping = NULL,
-  lr_scheduler = NULL,
+  epochs = 50,
+  early_stopping = 15,
+  lr_scheduler = config_lr_scheduler("reduce_on_plateau", 
+                                     patience = 5, factor = 0.5),
   custom_parameters = NULL,
-  device = c("cpu", "cuda", "mps"),
   plot = TRUE,
   verbose = TRUE
 )
 
+
+predict(cnn_9_test, newdata=cnn_predictor[cv_indices[[2]]$val,,,], type="response")
+a <- evaluate_model(cnn_9_test, cnn_predictor[cv_indices[[2]]$val,,,],train_set_response[cv_indices[[2]]$val,])
+rowMeans(a)
+cnn_9_test$model_properties
+print(architecture)

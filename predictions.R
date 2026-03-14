@@ -40,85 +40,97 @@ xy_valid_cells <- map_predictors[valid_rows, c("x","y")]
 dim(xy_valid_cells)
 ANN_predictor_map <- map_predictors_scaled[valid_rows, predictor_names]
 
-#removing unnecessary variables for memory
+#removing unnecessary variables for memory capacity
 rm(map_predictors_scaled, map_predictors, predictor_stack)
 gc()
-######################################################################################################################################
-#predict_map function with batch processing
-predict_map <- function(model, map_predictor_values, xy_valid_cells, 
-                        presence = FALSE, threshold = 0.5, batch_size = 10000){
-  
-  if (!nrow(map_predictor_values) == nrow(xy_valid_cells)){
-    print("Number of valid location grid cells does not equal predictions")
-    return(NULL)
-  }
-  
-  n_rows <- nrow(map_predictor_values)
-  n_batches <- ceiling(n_rows / batch_size)
-  
-  cat("Predicting in", n_batches, "batches of max", batch_size, "cells\n")
-  
-  # Predict in batches
-  predictions_list <- list()
-  
-  for(i in 1:n_batches) {
-    start_idx <- (i - 1) * batch_size + 1
-    end_idx <- min(i * batch_size, n_rows)
-    
-    cat("Processing batch", i, "of", n_batches, 
-        "(rows", start_idx, "to", end_idx, ")\n")
-    
-    # predictions for batch i
-    predictions_list[[i]] <- predict(model, 
-                                     newdata = map_predictor_values[start_idx:end_idx, ], 
-                                     type = "response")
-    
-    gc()  # Clean up memory between batches
-  }
-  
-  # Combine all predictions
-  cat("All predictions done! Combining batched predictions...\n")
-  predicted_map_probabilities <- do.call(rbind, predictions_list)
-  
-  cat("Predictions combined!")
-  # Project the predictions as probabilities or presence/absence
-  if (presence){
-    predicted_map_probabilities <- ifelse(predicted_map_probabilities > threshold, 1, 0)}
-  
-  #creating spatial species raster maps for one species at the time
-  prediction_map <- list()  
-  for (species in 1:length(species_names)) {
-    species_name <- species_names[species]
-    prediction_map[[species_name]] <- rast(cbind(xy_valid_cells, predicted_map_probabilities[,species]),
-                           crs = "EPSG:3035",
-                           type = "xyz")
-    names(prediction_map[[species_name]]) <- species_name
-    cat("Raster map for ",species_name, " created.\n")
-    gc()
-  }
 
+
+#load binomial model
+binomial_ann <- readRDS("results/final_trained_models/binomial_ann")
+
+# Option 2 Fixed: Grid layout for all species
+for (pred in 1:length(predictor_names)) {
+  png(paste0("results/plots/binomial/", predictor_names[pred], "_binomial.png"),
+      width = 5000, height = 4000)
   
-  #names(prediction_map) <- species_names
-  return(prediction_map)
+  par(mfrow = c(5, 5), mar = c(4, 4, 3, 1))  # Added margins
+  
+  for (sp in 1:length(species_names)) {
+    # Create empty plot first
+    plot.new()
+    
+    # Then add ALE plot
+    ale_result <- ALE(binomial_ann, variable = predictor_names[pred], output = sp, 
+                      plot = TRUE)
+    
+    # Add title
+    mtext(species_names[sp], side = 3, line = 1, cex = 1.2, font = 2)
+  }
+  
+  dev.off()
 }
-
-# Predictions using the median model from the best binomial model configuration
-model_cv_30_25 <- readRDS("results/candidate_models/binomial_ann/CV_models_hidden_30_25")
-median_best_config_binomial <- model_cv_30_25$model[[5]]
-
-# Predict with batching
-prediction_map1 <- predict_map(median_best_config_binomial, 
+# Your original approach but MUCH bigger
+for (pred in 1:length(predictor_names)) {
+  png(paste0("results/plots/binomial/", predictor_names[pred], "_binomial.png"),
+      width = 8000, height = 1200)  # Very wide, less tall
+  
+  ALE(binomial_ann, variable = predictor_names[pred])
+  
+  dev.off()
+}
+# Predict with batching to a
+prediction_map_binomial <- predict_map(binomial_ann, 
                                ANN_predictor_map, 
                                xy_valid_cells,
                                batch_size = 10000) 
 
-plot(prediction_map1$Clupea_harengus)
-
-#
-binomial_ann <- readRDS("results/candidate_models/binomial_ann")
+#convert from list to SpatRaster
+prediction_map_binomial <- rast(prediction_map_binomial)
 
 
+terra::writeRaster(prediction_map_binomial, 
+            "results/prediction_maps/prediction_map_binomial.tif", 
+            overwrite = TRUE)
 
-# Save result
-writeRaster(prediction_map1, "results/prediction_maps/multispecies_probabilities.tif", overwrite = TRUE)
+
+
+################################################################################
+
+prediction_map_binomial <- rast("results/prediction_maps/prediction_map_binomial.tif")
+names(prediction_map_binomial) <- species_names
+
+plot(prediction_map_binomial$Perca_fluviatilis)
+################################################################################
+# Test set evaluation
+test_set_predictors <- read.csv("data/preprocessed_data/final_data_split/test_set/test_set_predictors.csv")
+test_set_response <- read.csv("data/preprocessed_data/final_data_split/test_set/test_set_response.csv")[6:30]
+
+jpeg("results/plots/AUC_curves_binomial.jpeg", width = 800, height = 700)
+evaluation_results_binomial <- evaluate_model(model = binomial_ann,
+                                         test_pred = test_set_predictors,
+                                         test_resp = test_set_response)
+dev.off()
+
+write.csv(evaluation_results_binomial, "results/final_trained_models/binomial_testset_evaluation.csv")
+################################################################################
+#binary prediction maps
+
+#extracting species specific thresholds
+thr <- evaluation_results_binomial["threshold",]
+
+prediction_map_binomial_binary <- predict_map(binomial_ann, 
+                                       ANN_predictor_map, 
+                                       xy_valid_cells,
+                                       presence = T,
+                                       threshold =  thr,
+                                       batch_size = 10000) 
+prediction_map_binomial_binary <- rast(prediction_map_binomial_binary)
+names(prediction_map_binomial_binary) <- species_names
+
+terra::writeRaster(prediction_map_binomial_binary, 
+                   "results/prediction_maps/prediction_map_binomial_binary.tif", 
+                   overwrite = TRUE)
+
+
+plot(prediction_map_binomial$Clupea_harengus)
 
