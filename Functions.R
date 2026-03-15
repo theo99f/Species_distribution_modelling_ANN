@@ -12,11 +12,16 @@ full_response <- read.csv(paste0(directory,"train_set_response.csv"))
 predictor_names <- colnames(train_set_predictors)
 species_names <- colnames(full_response)[6:30]
 
+train_set_response <- full_response %>%
+  dplyr::select(all_of(species_names))
+
+
 #loading the indices of the grouped cross-validation split
 cv_split_folder <- "data/preprocessed_data/final_data_split/development_set/5-fold_grouped_cv_split/"
 cv_indices <- readRDS(paste0(cv_split_folder,"grouped_5fold_cv_indeces.rds")) 
 
-#function for a binary multi-species model evaluation
+
+#function for a binary cito multi-species model evaluation
 evaluate_model <- function(model, test_pred, test_resp, model_name = "DEFAULT"){
   #predictions for the test set predictors
   predictions <- predict(model, newdata = test_pred, type="response")
@@ -55,6 +60,10 @@ evaluate_model <- function(model, test_pred, test_resp, model_name = "DEFAULT"){
     return(NULL)
   }
 }
+
+# Function to cross-validate a cito model including training and evaluation, 
+# given a list of model configurations, a separate predictor and response set of
+# the same length, and a list with cross-validation indices 
 
 cross_validate_ann <- function(model_configs, predictor_set, response_set, cv_fold_indices){
   model_configs <- model_configs

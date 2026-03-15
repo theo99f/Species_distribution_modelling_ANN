@@ -9,9 +9,8 @@
 
 
 # NOTE: external pointers to torch do not work after saving and reloading a cito
-# dnn, therefore all steps that require 
-# the citodnn predict function for the mvp model have to be done in the same 
-# session as model training process
+# dnn, therefore all steps that require the citodnn predict function for the mvp 
+# model have to be done in the same session as model training process
 
 #package loading
 library(torch)
@@ -22,7 +21,7 @@ library(tidyr)
 library(pROC)
 source("Functions.R")
 
-train_set_response <- full_response[6:30]
+
 ################################################################################
 #train the best model configuration on all the training data
 mvp_ann <- dnn(X=train_set_predictors, 

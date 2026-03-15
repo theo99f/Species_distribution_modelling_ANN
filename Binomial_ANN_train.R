@@ -1,7 +1,7 @@
 ################################################################################
 #                                 Binomial ANN                                 #
 #                                                                              #
-#          Script for hyperparameter tuning, training and model selection      #
+#          Script for hyperparameter tuning and model selection                #
 ################################################################################
 
 library(torch)
@@ -12,16 +12,7 @@ library(tidyr)
 library(pROC)
 source("Functions.R")
 
-#loading preprocessed development set
-directory <- "data/preprocessed_data/final_data_split/development_set/"
-train_set_predictors <- read.csv(paste0(directory,"train_set_predictors.csv"))
-full_response <- read.csv(paste0(directory,"train_set_response.csv"))
 
-predictor_names <- colnames(train_set_predictors)
-species_names <- colnames(full_response)[6:30]
-
-train_set_response <- full_response %>%
-  select(all_of(species_names))
 
 ##################Hyperparameter Screening######################################
 #using standard 3-fold cross-validation with a broad range of hyperparameters
@@ -483,23 +474,5 @@ colMeans(TSS_cv)
 
 sd(AUC_cv_30_25)
 sd(TSS_cv_30_25)
-################################################################################
-#train the best model on all the training data
-binomial_ann <- dnn(X=train_set_predictors, 
-                    Y=cbind(train_set_response), 
-                    loss = "binomial",
-                    validation = 0.1,
-                    early_stopping = 15,
-                    epochs = 200,
-                    activation = "prelu",
-                    lr_scheduler = config_lr_scheduler("reduce_on_plateau", 
-                                                       patience = 5, factor = 0.5),
-                    lr = 0.6,
-                    hidden = c(30,25),
-                    batchsize = 32,
-                    lambda = 0.0001,
-                    alpha = 0.1)
-
-saveRDS(binomial_ann, file = "results/final_trained_models/binomial_ann")
 
 

@@ -134,3 +134,4 @@ terra::writeRaster(prediction_map_binomial_binary,
 
 plot(prediction_map_binomial$Clupea_harengus)
 
+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
