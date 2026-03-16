@@ -2,6 +2,8 @@
 #                                Functions                                     #
 #                 (and variables needed across scripts)                        #
 ################################################################################
+library(dplyr)
+library(torch)
 
 #loading preprocessed development set
 directory <- "data/preprocessed_data/final_data_split/development_set/"

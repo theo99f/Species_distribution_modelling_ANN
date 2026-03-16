@@ -1,5 +1,5 @@
 ################################################################################
-#                                 Predictions                                  #
+#                             Final Binomial ANN                               #
 ################################################################################
 #package loading
 library(torch)
@@ -9,6 +9,84 @@ library(dplyr)
 library(tidyr)
 library(pROC)
 source("Functions.R")
+
+################################################################################
+#train the best model on all the training data
+binomial_ann <- dnn(X=train_set_predictors, 
+                    Y=cbind(train_set_response), 
+                    loss = "binomial",
+                    validation = 0.1,
+                    early_stopping = 15,
+                    epochs = 200,
+                    activation = "prelu",
+                    lr_scheduler = config_lr_scheduler("reduce_on_plateau", 
+                                                       patience = 5, factor = 0.5),
+                    lr = 0.6,
+                    hidden = c(30,25),
+                    batchsize = 32,
+                    lambda = 0.0001,
+                    alpha = 0.1)
+
+saveRDS(binomial_ann, file = "results/final_trained_models/binomial_ann")
+
+################################################################################
+#reload the model
+binomial_ann <- readRDS("results/final_trained_models/binomial_ann")
+
+################################################################################
+# Test set evaluation
+################################################################################
+test_set_predictors <- read.csv("data/preprocessed_data/final_data_split/test_set/test_set_predictors.csv")
+test_set_response <- read.csv("data/preprocessed_data/final_data_split/test_set/test_set_response.csv")[6:30]
+
+#call the model evaluation function inside a printing device to save AUC curves
+jpeg("results/plots/AUC_curves_binomial.jpeg", width = 800, height = 700)
+evaluation_results_binomial <- evaluate_model(model = binomial_ann,
+                                              test_pred = test_set_predictors,
+                                              test_resp = test_set_response)
+dev.off()
+
+#save evaluation results
+write.csv(evaluation_results_binomial, "results/final_trained_models/binomial_testset_evaluation.csv")
+
+
+
+#extracting species-specific thresholds for later presence/absence predictions
+thr <- evaluation_results_binomial["threshold",]
+################################################################################
+#saving predictions on the whole data set for cooccurence analysis
+all_predictors <- rbind(train_set_predictors, test_set_predictors)
+predictions_data_set <- predict(binomial_ann, newdata=all_predictors, type = "response")
+
+write.csv(predictions_data_set, "results/community_analysis/predicted_community_binomial.csv")
+
+
+#removing unnecessary variables for memory capacity
+rm(evaluation_results_binomial, test_set_predictors, test_set_response, all_predictors, predictions_data_set)
+gc()
+
+
+#plotting and saving Accumulated local effect plots to determine predictor effects
+for (pred in 1:length(predictor_names)) {
+  png(paste0("results/plots/binomial/", predictor_names[pred], "_binomial.png"),
+      width = 8000, height = 1200)  # Very wide, less tall
+  
+  ALE(binomial_ann, variable = predictor_names[pred])
+  
+  dev.off()
+}
+
+#saving feature importance
+feature_importance_ann <- summary(binomial_ann)
+saveRDS(feature_importance_ann, 
+        file = "results/final_trained_models/summary_binomial.rds")
+
+rm(feature_importance_ann)
+gc()
+
+################################################################################
+# Preparing predictions for the whole map
+################################################################################
 
 # Read all predictor rasters
 predictor_files <- list.files("data/raw_data/final_raw_dataset/predictors_fish", 
@@ -45,39 +123,6 @@ rm(map_predictors_scaled, map_predictors, predictor_stack)
 gc()
 
 
-#load binomial model
-binomial_ann <- readRDS("results/final_trained_models/binomial_ann")
-
-# Option 2 Fixed: Grid layout for all species
-for (pred in 1:length(predictor_names)) {
-  png(paste0("results/plots/binomial/", predictor_names[pred], "_binomial.png"),
-      width = 5000, height = 4000)
-  
-  par(mfrow = c(5, 5), mar = c(4, 4, 3, 1))  # Added margins
-  
-  for (sp in 1:length(species_names)) {
-    # Create empty plot first
-    plot.new()
-    
-    # Then add ALE plot
-    ale_result <- ALE(binomial_ann, variable = predictor_names[pred], output = sp, 
-                      plot = TRUE)
-    
-    # Add title
-    mtext(species_names[sp], side = 3, line = 1, cex = 1.2, font = 2)
-  }
-  
-  dev.off()
-}
-# Your original approach but MUCH bigger
-for (pred in 1:length(predictor_names)) {
-  png(paste0("results/plots/binomial/", predictor_names[pred], "_binomial.png"),
-      width = 8000, height = 1200)  # Very wide, less tall
-  
-  ALE(binomial_ann, variable = predictor_names[pred])
-  
-  dev.off()
-}
 # Predict with batching to a
 prediction_map_binomial <- predict_map(binomial_ann, 
                                ANN_predictor_map, 
@@ -101,18 +146,6 @@ names(prediction_map_binomial) <- species_names
 
 plot(prediction_map_binomial$Perca_fluviatilis)
 ################################################################################
-# Test set evaluation
-test_set_predictors <- read.csv("data/preprocessed_data/final_data_split/test_set/test_set_predictors.csv")
-test_set_response <- read.csv("data/preprocessed_data/final_data_split/test_set/test_set_response.csv")[6:30]
-
-jpeg("results/plots/AUC_curves_binomial.jpeg", width = 800, height = 700)
-evaluation_results_binomial <- evaluate_model(model = binomial_ann,
-                                         test_pred = test_set_predictors,
-                                         test_resp = test_set_response)
-dev.off()
-
-write.csv(evaluation_results_binomial, "results/final_trained_models/binomial_testset_evaluation.csv")
-################################################################################
 #binary prediction maps
 
 #extracting species specific thresholds
@@ -132,6 +165,5 @@ terra::writeRaster(prediction_map_binomial_binary,
                    overwrite = TRUE)
 
 
-plot(prediction_map_binomial$Clupea_harengus)
+plot(prediction_map_binomial_binary$Clupea_harengus)
 
-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
