@@ -51,42 +51,27 @@ response_fish <- cbind(response_fish, cell=predictor_values$cell)
 
 
 ################################################################################
-# Randomly splitting the dataset grouped by grid cell numbers and choosing a split
-# with balanced presences between train and test set
+# Randomly splitting the dataset grouped by grid cell numbers
 
 
 #maximum repeated cell in the data set was repeated 279 times
 max(table(response_fish$cell))
 
-#train/test split is performed 100 times grouped by grid cells and the split with 
-#the most equal presences/absences is kept
-#initial arbitrary high value for split metric
-best_split_measure <- 1000000
-for (variable in 1:100) {
-  #splits train and test data by assigning all data points of the same grid cell to the same split
-  split <- group_initial_split(response_fish, group = "cell", prop = 0.8)
-  development_data <- training(split)%>%
-    select(all_of(species_names))
-  test_data <- testing(split)%>%
-    select(all_of(species_names))
-  
-  presence_ratio <- colMeans(development_data)/colMeans(test_data)
-  curr_split_measure <- sum((1-presence_ratio)^2)
-    final_split <-split}
 
-
+#splits train and test data by assigning all data points of the same grid cell to the same split
+split <- group_initial_split(response_fish, group = "cell", prop = 0.8)
 
 #Save the indeces of the train and testing data
 index <- 1:nrow(response_fish)
-train_set_index <- final_split$in_id
+train_set_index <- split$in_id
 test_set_index <- index[!(index %in% train_set_index)]
 
 length(train_set_index)
 length(test_set_index)
 
 #DEFINE the response variable for train and testing data
-train_set_response <- training(final_split)
-test_set_response <- testing(final_split)
+train_set_response <- training(split)
+test_set_response <- testing(split)
 
 #Construct the predictor variables for train and testing data
 #First scale the training data, then apply the same scale to the test data
@@ -102,17 +87,20 @@ test_set_predictors <- predictors_fish[test_set_index,predictor_names]%>%
 
 #############################CHECK BALANCE######################################
 
+source("Functions.R")
 train_response <- train_set_response%>%
   select(all_of(species_names))
 
-
-test_response <- test_set_response%>%
+test_response <- read.csv("data/preprocessed_data/final_data_split/test_set/test_set_response.csv")
+test_response <- test_response %>%
   select(all_of(species_names))
 
-colMeans(train_response)
-colMeans(test_response)
+colMeans(train_response)/colMeans(test_response)
 
-
+mean(colMeans(train_response)/colMeans(test_response))
+sd(colMeans(train_response)/colMeans(test_response))
+min(colMeans(train_response)/colMeans(test_response))
+max(colMeans(train_response)/colMeans(test_response))
 
 ################################################################################
 #                             SAVING FILES                                     #

@@ -18,8 +18,6 @@ train_set_response <- full_response %>%
   select(all_of(species_names),cell)
 
 
-
-
 #function performs grouped cross-validation for k folds for n times and returns 
 #the split with most balanced species presences across folds
 

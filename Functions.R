@@ -4,6 +4,7 @@
 ################################################################################
 library(dplyr)
 library(torch)
+library(cito)
 
 #loading preprocessed development set
 directory <- "data/preprocessed_data/final_data_split/development_set/"
@@ -178,7 +179,32 @@ predict_map <- function(model, map_predictor_values,
   return(prediction_map)
 }
 
-
+#create a heatmap from a correlation matrix
+create_heatmap <- function(cor_matrix, title = "Insert a title"){
+  # Convert matrix to long format
+  cor_long <- melt(cor_matrix)
+  colnames(cor_long) <- c("Species1", "Species2", "Correlation")
+  
+  # Create heatmap
+  heatmap <- ggplot(cor_long, aes(x = Species1, y = Species2, fill = Correlation)) +
+    geom_tile(color = "white", linewidth = 0.5) +
+    scale_fill_gradient2(low = "darkred", 
+                         mid = "white", 
+                         high = "blue",
+                         midpoint = 0,
+                         limits = c(-1, 1),
+                         name = "Correlation") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 9),
+          axis.text.y = element_text(size = 9),
+          axis.title = element_blank(),
+          legend.position = "right",
+          panel.grid = element_blank()) +
+    coord_fixed() +
+    labs(title = title)
+  
+  return(heatmap)
+}
 predict_mvp_manual <- function(X, model, species_names) {
   X <- as.matrix(X)
   
