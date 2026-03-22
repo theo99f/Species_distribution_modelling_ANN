@@ -39,6 +39,8 @@ mvp_ann <- dnn(X=train_set_predictors,
                lambda = 0.0001,
                alpha = 0.15)
 
+plot(mvp_ann)
+
 saveRDS(mvp_ann, file = "results/final_trained_models/mvp_ann")
 
 ################################################################################
