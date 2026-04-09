@@ -23,8 +23,14 @@ train_set_response <- full_response %>%
 cv_split_folder <- "data/preprocessed_data/final_data_split/development_set/5-fold_grouped_cv_split/"
 cv_indices <- readRDS(paste0(cv_split_folder,"grouped_5fold_cv_indeces.rds")) 
 
-
+################################################################################
 #function for a binary cito multi-species model evaluation
+################################################################################
+#This function should only be used for evaluation in cross-validation, as it 
+#returns the maximum TSS with the optimal threshold optimized on the validation set
+
+# to avoid data leakage, for final model evaluation function 
+# "evaluate_model_fixed_threshold()" should be used
 evaluate_model <- function(model, test_pred, test_resp, model_name = "DEFAULT"){
   #predictions for the test set predictors
   predictions <- predict(model, newdata = test_pred, type="response")
@@ -63,11 +69,83 @@ evaluate_model <- function(model, test_pred, test_resp, model_name = "DEFAULT"){
     return(NULL)
   }
 }
+################################################################################
+# evaluation function that evaluates TSS for a predefined threshold
+# to be used for final model evaluation
 
+#only set defauft_predict_function to FALSE, if predictions should be made for 
+#the MVP model after model was reloaded
+evaluate_model_fixed_threshold <- function(model, 
+                                           test_pred, 
+                                           test_resp, 
+                                           fixed_threshold,
+                                           default_predict_function =TRUE){
+  #predictions for the test set predictors
+  if (default_predict_function ==TRUE){
+    predictions <- predict(model, newdata = test_pred, type="response")}
+  else{
+    predictions <- predict_mvp_manual(X = test_pred, model = model, species_names = species_names)  
+  }
+  
+  col_sp <- rainbow(length(species_names))
+  if (all(dim(predictions) == dim(test_resp))){
+    
+    #calculate AUC and TSS per species and plot ROC
+    AUC_species <- numeric(length(species_names))
+    TSS_species <- numeric(length(species_names))
+    
+    names(AUC_species) <- species_names
+    for (species in 1:length(species_names)) {
+      
+      ROC_species <- roc(test_resp[,species], predictions[,species])
+      AUC_species[species] <- ROC_species$auc
+      
+      # Compute sensitivity and specificity at the fixed threshold
+      sp_metrics <- coords(ROC_species, x = fixed_threshold[species], 
+                           input = "threshold", ret = c("sensitivity", "specificity"))
+      TSS_species[species] <- sp_metrics$sensitivity + sp_metrics$specificity - 1
+      
+      if (species==1){
+        plot(ROC_species, col =col_sp[species])
+      }
+      else {plot(ROC_species, col =col_sp[species], add= T)}
+    }
+    legend("bottomright", legend = species_names, 
+           col = col_sp,
+           lty = 1,
+           lwd = 2,
+           bty ="n")
+    threshold <- fixed_threshold
+    names(threshold) <- species_names
+    return(rbind(AUC_species,TSS_species,threshold))
+    
+  }else{
+    print("Prediction dimensions do not match the test set response dimensions")
+    return(NULL)
+  }
+}
+
+
+
+# Helper function to extract species-specific thresholds aggregated across CV folds.
+# Takes a CV model object (as returned by cross_validate_ann) and returns
+# the median threshold per species across all folds.
+
+get_cv_median_threshold <- function(cv_model){
+  # Extract the threshold row from each fold's performance matrix
+  threshold_matrix <- sapply(cv_model$performance, function(x) x["threshold", ])
+  # threshold_matrix: species (rows) x folds (columns)
+  # return the median threshold
+  median_threshold <- apply(threshold_matrix, 1, median)
+  return(median_threshold)
+}
+
+
+
+################################################################################
 # Function to cross-validate a cito model including training and evaluation, 
 # given a list of model configurations, a separate predictor and response set of
 # the same length, and a list with cross-validation indices 
-
 cross_validate_ann <- function(model_configs, predictor_set, response_set, cv_fold_indices){
   model_configs <- model_configs
   k_fold_models <- list(model = list(),
@@ -119,11 +197,15 @@ cross_validate_ann <- function(model_configs, predictor_set, response_set, cv_fo
 
 ######################################################################################################################################
 #predict_map function with batch processing
+
+#only set defauft_predict_function to FALSE, if predictions should be made for 
+#the MVP model after model was reloaded
 predict_map <- function(model, map_predictor_values, 
                         xy_valid_cells, 
                         presence = FALSE, 
                         threshold = rep(0.5,length(species_names)), #vector of species-specific thresholds
-                        batch_size = 10000){
+                        batch_size = 10000,
+                        default_predict_function = TRUE){
   
   if (!nrow(map_predictor_values) == nrow(xy_valid_cells)){
     print("Number of valid location grid cells does not equal predictions")
@@ -146,6 +228,16 @@ predict_map <- function(model, map_predictor_values,
         "(rows", start_idx, "to", end_idx, ")\n")
     
     # predictions for batch i
+    #for mvp model if torch pointer are broken
+    if (default_predict_function==FALSE){
+      predictions_list[[i]] <- predict_mvp_manual(X = map_predictor_values[start_idx:end_idx, ], 
+                                       model = model,
+                                       species_names = species_names)
+      
+      gc()  # Clean up memory between batches
+      next
+    }
+    #standard default case with cito's predict function
     predictions_list[[i]] <- predict(model, 
                                      newdata = map_predictor_values[start_idx:end_idx, ], 
                                      type = "response")
@@ -212,20 +304,25 @@ create_heatmap <- function(cor_matrix,
   
   return(heatmap)
 }
+
+
+#function to manually predict for the MVP model by extracting its saved weights
+#function becomes necessary as cito's own predict function fails after reloading
+#the 
 predict_mvp_manual <- function(X, model, species_names) {
   X <- as.matrix(X)
   
   # Get weights from saved model
-  W1 <- model$weights[[1]]$`0.weight`
-  b1 <- model$weights[[1]]$`0.bias`
-  alpha1 <- model$weights[[1]]$`1.weight`
+  W1 <- model$weights[[2]]$`0.weight`
+  b1 <- model$weights[[2]]$`0.bias`
+  alpha1 <- model$weights[[2]]$`1.weight`
   
-  W2 <- model$weights[[1]]$`2.weight`
-  b2 <- model$weights[[1]]$`2.bias`
-  alpha2 <- model$weights[[1]]$`3.weight`
+  W2 <- model$weights[[2]]$`2.weight`
+  b2 <- model$weights[[2]]$`2.bias`
+  alpha2 <- model$weights[[2]]$`3.weight`
   
-  W3 <- model$weights[[1]]$`4.weight`
-  b3 <- model$weights[[1]]$`4.bias`
+  W3 <- model$weights[[2]]$`4.weight`
+  b3 <- model$weights[[2]]$`4.bias`
   
   # Forward pass
   z1 <- X %*% t(W1) + matrix(b1, nrow(X), length(b1), byrow = TRUE)
@@ -235,9 +332,17 @@ predict_mvp_manual <- function(X, model, species_names) {
   h2 <- ifelse(z2 > 0, z2, alpha2 * z2)
   
   logits <- h2 %*% t(W3) + matrix(b3, nrow(h2), length(b3), byrow = TRUE)
-  probs <- 1 / (1 + exp(-logits))
+  probs <- 1 / (1 + exp(-logits*1.7012))
   
   colnames(probs) <- species_names
   return(probs)
 }
+#verify that manual predict function gives the same results as cito's own predict function
+pred_dataset <- read.csv("results/community_analysis/predicted_community_mvp.csv")
+mvp_ann <- readRDS("results/final_trained_models/mvp_ann")
+predict_mvp_manual(train_set_predictors[20,], mvp_ann, species_names = species_names)
+pred_dataset[20,]
+
+mvp_ann$use_model_epoch
+mvp_ann$weights
 

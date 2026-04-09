@@ -33,6 +33,14 @@ saveRDS(binomial_ann, file = "results/final_trained_models/binomial_ann")
 #reload the model
 binomial_ann <- readRDS("results/final_trained_models/binomial_ann")
 
+
+# get the averaged tuned threshold that maximizes TSS from all the cross-validation folds
+# load the CV models object
+cv_bin_model <- readRDS("results/candidate_models/binomial_ann/CV_models_hidden_30_25")
+thr_bin <- get_cv_median_threshold(cv_bin_model)
+
+threshold_matrix_bin <- sapply(cv_bin_model$performance, function(x) x["threshold", ])
+
 ################################################################################
 # Test set evaluation
 ################################################################################
@@ -41,20 +49,51 @@ test_set_response <- read.csv("data/preprocessed_data/final_data_split/test_set/
 
 #call the model evaluation function inside a printing device to save AUC curves
 jpeg("results/plots/AUC_curves_binomial.jpeg", width = 800, height = 700)
-evaluation_results_binomial <- evaluate_model(model = binomial_ann,
+evaluation_results_binomial <- evaluate_model_fixed_threshold(model = binomial_ann,
                                               test_pred = test_set_predictors,
-                                              test_resp = test_set_response)
+                                              test_resp = test_set_response,
+                                              fixed_threshold = thr_bin)
 dev.off()
 
 #save evaluation results
 write.csv(evaluation_results_binomial, "results/final_trained_models/binomial_testset_evaluation.csv")
 
-
-
-#extracting species-specific thresholds for later presence/absence predictions
-thr <- evaluation_results_binomial["threshold",]
 ################################################################################
-#saving predictions on the whole data set for cooccurence analysis
+#performance uncertainty by evaluating each cross validation model on their 
+#validation set using the fixed median thresholds
+for (fold in 1:length(cv_indices)) {
+  model <- cv_bin_model$model[[fold]]
+  validation_idx <- cv_indices[[fold]]$val
+  
+  #get the median of thresholds of the 4 other folds excluding the threshold of the present fold to avoid data leakage
+  thr <- apply(threshold_matrix_bin[,-fold], 1, median)
+  evaluation_bin_fold <- evaluate_model_fixed_threshold(model = model,
+                                                        test_pred = train_set_predictors[validation_idx,],
+                                                        test_resp = train_set_response[validation_idx,],
+                                                        fixed_threshold = thr,
+                                                        default_predict_function = TRUE)
+  if (fold==1){
+    AUC_cv <- evaluation_bin_fold["AUC_species",]
+    TSS_cv <- evaluation_bin_fold["TSS_species",]
+  }else{
+    AUC_cv <- cbind(AUC_cv, evaluation_bin_fold["AUC_species",])
+    TSS_cv <- cbind(TSS_cv, evaluation_bin_fold["TSS_species",])}
+}
+AUC_cv <- cbind(AUC_cv, rowMeans(AUC_cv),apply(AUC_cv, 1, sd))
+TSS_cv <- cbind(TSS_cv, rowMeans(TSS_cv),apply(TSS_cv, 1, sd))
+colnames(AUC_cv) <- c(1:5, "mean", "sd")
+colnames(TSS_cv) <- c(1:5, "mean", "sd")
+
+write.csv(AUC_cv, 
+          "results/final_trained_models/AUC_bin_performance_uncertainty_crossvalidation.csv")
+write.csv(TSS_cv, 
+          "results/final_trained_models/TSS_bin_performance_uncertainty_crossvalidation.csv")
+################################################################################
+#saving out-of-fold predictions
+
+
+################################################################################
+#saving predictions on the whole data set using the final model for co-occurrence analysis
 all_predictors <- rbind(train_set_predictors, test_set_predictors)
 predictions_data_set <- predict(binomial_ann, newdata=all_predictors, type = "response")
 
@@ -81,7 +120,7 @@ feature_importance_ann <- summary(binomial_ann)
 saveRDS(feature_importance_ann, 
         file = "results/final_trained_models/summary_binomial.rds")
 
-rm(feature_importance_ann)
+rm(feature_importance_ann, model, cv_bin_model)
 gc()
 
 ################################################################################
@@ -119,11 +158,11 @@ dim(xy_valid_cells)
 ANN_predictor_map <- map_predictors_scaled[valid_rows, predictor_names]
 
 #removing unnecessary variables for memory capacity
-rm(map_predictors_scaled, map_predictors, predictor_stack)
+rm(map_predictors_scaled, map_predictors, predictor_stack, valid_rows, cv_bin_model)
 gc()
 
-
-# Predict with batching to a
+################################################################################
+# Predict the whole map using probabilities and batches
 prediction_map_binomial <- predict_map(binomial_ann, 
                                ANN_predictor_map, 
                                xy_valid_cells,
@@ -131,31 +170,21 @@ prediction_map_binomial <- predict_map(binomial_ann,
 
 #convert from list to SpatRaster
 prediction_map_binomial <- rast(prediction_map_binomial)
-
+names(prediction_map_binomial) <- species_names
 
 terra::writeRaster(prediction_map_binomial, 
             "results/prediction_maps/prediction_map_binomial.tif", 
             overwrite = TRUE)
 
 
-
-################################################################################
-
-prediction_map_binomial <- rast("results/prediction_maps/prediction_map_binomial.tif")
-names(prediction_map_binomial) <- species_names
-
-plot(prediction_map_binomial$Perca_fluviatilis)
 ################################################################################
 #binary prediction maps
-
-#extracting species specific thresholds
-thr <- evaluation_results_binomial["threshold",]
 
 prediction_map_binomial_binary <- predict_map(binomial_ann, 
                                        ANN_predictor_map, 
                                        xy_valid_cells,
                                        presence = T,
-                                       threshold =  thr,
+                                       threshold =  thr_bin,
                                        batch_size = 10000) 
 prediction_map_binomial_binary <- rast(prediction_map_binomial_binary)
 names(prediction_map_binomial_binary) <- species_names
@@ -164,6 +193,5 @@ terra::writeRaster(prediction_map_binomial_binary,
                    "results/prediction_maps/prediction_map_binomial_binary.tif", 
                    overwrite = TRUE)
 
-
-plot(prediction_map_binomial_binary$Clupea_harengus)
-
+rm(prediction_map_binomial_binary)
+gc()

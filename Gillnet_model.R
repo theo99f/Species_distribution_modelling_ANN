@@ -126,22 +126,6 @@ gillnet_mvp_ann <- dnn(X=gillnet_train_predictors,
 
 saveRDS(gillnet_mvp_ann, file = "results/final_trained_models/gillnet_mvp_ann")
 
-################################################################################
-# Test set evaluation
-################################################################################
-jpeg("results/plots/gillnet_mvp_model/AUC_curves_gillnet_model.jpeg", 
-     width = 800, height = 700)
-evaluation_results <- evaluate_model(model = gillnet_mvp_ann,
-                                         test_pred = gillnet_test_predictors,
-                                         test_resp = gillnet_test_response)
-dev.off()
-
-write.csv(evaluation_results, 
-          "results/final_trained_models/gillnet_mvp_testset_evaluation.csv")
-
-
-#extracting species-specific thresholds for later presence/absence predictions
-thr <- evaluation_results["threshold",]
 
 ################################################################################
 #saving predictions on the whole data set and test set for co-occurence analysis
@@ -152,7 +136,35 @@ predictions_test_set <- predict(gillnet_mvp_ann, newdata = gillnet_test_predicto
 write.csv(predictions_data_set, "results/community_analysis/predicted_community_gillnet.csv")
 write.csv(predictions_test_set, "results/community_analysis/predicted_community_gillnet_testset.csv")
 
+################################################################################
+# Test set evaluation
+################################################################################
+gillnet_test_predictors <- read.csv("data/preprocessed_data/gillnet_only_dataset/test_predictors.csv", row.names = 1)
+gillnet_test_response <- read.csv("data/preprocessed_data/gillnet_only_dataset/test_response.csv", row.names = 1)
+gillnet_mvp_ann <- readRDS("results/final_trained_models/gillnet_mvp_ann")
 
+
+#this function returns max TSS on test set. The TSS results are therefore not valid 
+# and only the AUC score is unbiased
+jpeg("results/plots/gillnet_mvp_model/AUC_curves_gillnet_model.jpeg", 
+     width = 800, height = 700)
+evaluation_results <- evaluate_model(model = gillnet_mvp_ann,
+                                     test_pred = gillnet_test_predictors,
+                                     test_resp = gillnet_test_response)
+dev.off()
+
+write.csv(evaluation_results, 
+          "results/final_trained_models/gillnet_mvp_testset_evaluation.csv")
+
+cv_mvp_model <- readRDS("results/candidate_models/mvp_ann/CV_models_hidden_27_27")
+thr_mvp <- get_cv_median_threshold(cv_mvp_model)
+
+evaluation_results <- evaluate_model_fixed_threshold(model = gillnet_mvp_ann,
+                                                     test_pred = gillnet_test_predictors,
+                                                     test_resp = gillnet_test_response,
+                                                     fixed_threshold = thr_mvp,
+                                                     default_predict_function = FALSE)
+rowMeans(evaluation_results)
 #removing unnecessary variables for memory capacity
 rm(evaluation_results_mvp, 
    test_set_predictors, 

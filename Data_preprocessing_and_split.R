@@ -51,12 +51,17 @@ response_fish <- cbind(response_fish, cell=predictor_values$cell)
 
 
 ################################################################################
-# Randomly splitting the dataset grouped by grid cell numbers
-
 
 #maximum repeated cell in the data set was repeated 279 times
 max(table(response_fish$cell))
 
+#unique cell numbers
+length(unique(response_fish$cell))
+
+################################################################################
+# Dataset split into development (training) and test data
+# Randomly splitting the dataset grouped by grid cell numbers
+################################################################################
 
 #splits train and test data by assigning all data points of the same grid cell to the same split
 split <- group_initial_split(response_fish, group = "cell", prop = 0.8)

@@ -107,8 +107,6 @@ cor.test(hp_sorted$batchsize[!is.infinite(hp_sorted$test)], hp_sorted$test[!is.i
 cv_split_folder <- "data/preprocessed_data/final_data_split/development_set/5-fold_grouped_cv_split/"
 cv_indices <- readRDS(paste0(cv_split_folder,"grouped_5fold_cv_indeces.rds")) 
 
-
-
 #hyperparameter tuning using random search for 20 configuration steps and 5fold grouped cv
 for (config in 1:20) {
   configs <- list(
@@ -168,7 +166,6 @@ cor.test(configuration$lambda, configuration$mean_TSS, method = "pearson")
 cor.test(configuration$lr, configuration$mean_AUC, method = "pearson")
 
 ################################################################################
-
 #Random search hyperparameter tuning with 5-fold cross-validation in parallel loop
 library(parallel)
 library(foreach)
