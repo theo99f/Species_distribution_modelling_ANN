@@ -29,3 +29,42 @@ sum(fish_data$method=="Gillnet")/nrow(fish_data)
 sum(fish_data$method=="Pelagic trawl")/nrow(fish_data)
 sum(fish_data$method=="Fyke net")/nrow(fish_data)
 
+################################################################################
+surface_salinity <- rast("data/raw_data/final_raw_dataset/predictors_fish/salinity_surface_mean.tif")
+secchi_depth <- rast("data/raw_data/final_raw_dataset/predictors_fish/secchi_depth_mean.tif")
+summary(surface_salinity)
+sd(surface_salinity)
+
+plot(surface_salinity)
+plot(secchi_depth)
+################################################################################
+#checking predictor correlations in the data set
+cor.test(train_set_predictors$depth, train_set_predictors$salinity_bottom_mean)
+cor.test(train_set_predictors$depth, train_set_predictors$salinity_surface_mean)
+
+cor.test(train_set_predictors$salinity_surface_mean, train_set_predictors$temperature_bottom_mean)
+cor.test(train_set_predictors$salinity_bottom_mean, train_set_predictors$temperature_bottom_mean)
+
+cor.test(train_set_predictors$salinity_surface_mean, train_set_predictors$salinity_bottom_mean)
+
+cor.test(train_set_predictors$sea_ice_fraction_mean, train_set_predictors$salinity_bottom_mean)
+cor.test(train_set_predictors$sea_ice_fraction_mean, train_set_predictors$salinity_surface_mean)
+cor.test(train_set_predictors$sea_ice_fraction_mean, train_set_predictors$depth)
+
+cor.test(train_set_predictors$sea_ice_fraction_mean, train_set_predictors$secchi_depth_mean)
+
+cor.test(train_set_predictors$salinity_surface_mean,train_set_predictors$secchi_depth_mean)
+cor.test(train_set_predictors$salinity_bottom_mean,train_set_predictors$secchi_depth_mean)
+
+cor.test(train_set_predictors$sea_ice_fraction_mean, train_set_predictors$temperature_bottom_mean)
+cor.test(train_set_predictors$depth, train_set_predictors$temperature_bottom_mean)
+cor.test(train_set_predictors$salinity_surface_mean,train_set_predictors$oxygen_bottom_mean)
+cor.test(train_set_predictors$salinity_bottom_mean,train_set_predictors$oxygen_bottom_mean)
+cor.test(train_set_predictors$sea_ice_fraction_mean,train_set_predictors$oxygen_bottom_mean)
+cor.test(train_set_predictors$depth,train_set_predictors$oxygen_bottom_mean)
+cor.test(train_set_predictors$secchi_depth_mean,train_set_predictors$oxygen_bottom_mean)
+
+cor.test(train_set_predictors$depth,train_set_predictors$wave_significant_height_mean)
+
+cor.test(train_set_predictors$oxy,train_set_predictors$wave_significant_height_mean)
+

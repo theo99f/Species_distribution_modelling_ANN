@@ -151,6 +151,7 @@ cv_mvp_model <- readRDS("results/candidate_models/mvp_ann/CV_models_hidden_27_27
 thr_mvp <- get_cv_median_threshold(cv_mvp_model)
 
 threshold_matrix_mvp <- sapply(cv_mvp_model$performance, function(x) x["threshold", ])
+write.csv(cbind(threshold_matrix_mvp,thr_mvp), "results/final_trained_models/threshold_mvp.csv")
 
 jpeg("results/plots/mvp/AUC_curves_mvp.jpeg", width = 800, height = 700)
 evaluation_results_mvp <- evaluate_model_fixed_threshold(model = mvp_ann,
@@ -163,25 +164,36 @@ dev.off()
 write.csv(evaluation_results_mvp, 
           "results/final_trained_models/mvp_testset_evaluation.csv")
 
+################################################################################
 #performance uncertainty by evaluating each cross validation model on their 
 #validation set using the fixed median thresholds
 for (fold in 1:length(cv_indices)) {
   model <- cv_mvp_model$model[[fold]]
   validation_idx <- cv_indices[[fold]]$val
   
-  #get the median of thresholds of the 4 other folds excluding the threshold of the present fold to avoid data leakage
+  #get the median of thresholds of the 4 other folds excluding the threshold of 
+  #the present fold to avoid data leakage for uncertainty estimation
   thr <- apply(threshold_matrix_mvp[,-fold], 1, median)
   evaluation_mvp_fold <- evaluate_model_fixed_threshold(model = model,
                                                            test_pred = train_set_predictors[validation_idx,],
                                                            test_resp = train_set_response[validation_idx,],
                                                            fixed_threshold = thr,
                                                            default_predict_function = FALSE)
+
   if (fold==1){
     AUC_cv <- evaluation_mvp_fold["AUC_species",]
     TSS_cv <- evaluation_mvp_fold["TSS_species",]
+    #out of fold predictions for later sanity check of predictions
+    mvp_cv_oof_predictions <- predict_mvp_manual(X= train_set_predictors[validation_idx,],
+                       model = model,
+                       species_names = species_names)
   }else{
     AUC_cv <- cbind(AUC_cv, evaluation_mvp_fold["AUC_species",])
-    TSS_cv <- cbind(TSS_cv, evaluation_mvp_fold["TSS_species",])}
+    TSS_cv <- cbind(TSS_cv, evaluation_mvp_fold["TSS_species",])
+    #out of fold predictions for later sanity check of predictions
+    mvp_cv_oof_predictions <- rbind(mvp_cv_oof_predictions,predict_mvp_manual(X= train_set_predictors[validation_idx,],
+                                                 model = model,
+                                                 species_names = species_names))}
 }
 AUC_cv <- cbind(AUC_cv, rowMeans(AUC_cv),apply(AUC_cv, 1, sd))
 TSS_cv <- cbind(TSS_cv, rowMeans(TSS_cv),apply(TSS_cv, 1, sd))
@@ -192,6 +204,10 @@ write.csv(AUC_cv,
           "results/final_trained_models/AUC_mvp_performance_uncertainty_crossvalidation.csv")
 write.csv(TSS_cv, 
           "results/final_trained_models/TSS_mvp_performance_uncertainty_crossvalidation.csv")
+write.csv(mvp_cv_oof_predictions, 
+          "results/prediction_maps/full_dataset_predictions/cv_out_of_fold_predictions_mvp.csv")
+
+  
 
 rm(evaluation_results_mvp)
 gc()

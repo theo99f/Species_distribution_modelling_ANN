@@ -114,8 +114,8 @@ p3g <- create_heatmap(residual_correlation_gillnet,
 #save a combined plot
 ggsave("results/plots/correlation_decomposition_gillnet.tiff", 
        p1g / p2g / p3g , 
-       width = 18, 
-       height = 8, 
+       width = 8, 
+       height = 18, 
        dpi = 300,
        compression = "lzw")
 
@@ -218,7 +218,7 @@ get_top_correlations <- function (n=10, cor_matrix){
   }
   return(top_corr)
 }
-
+ALE()
 
 #inspect the highest correlations
 get_top_correlations(n= 15, cor_matrix=residual_correlation_gillnet)
@@ -246,7 +246,7 @@ get_top_correlations(n=10, cor_matrix = minus_plus_rel)
 
 get_species_pair_correlations("Coregonus_albula", "Clupea_harengus",corr_matrix_list)
 get_species_pair_correlations("Coregonus_maraena", "Sprattus_sprattus",corr_matrix_list)
-get_species_pair_correlations("Coregonus_albula", "Sprattus_sprattus",corr_matrix_list)
+get_species_pair_correlations("Coregonus albula", "Sprattus sprattus",corr_matrix_list)
 
 get_species_pair_correlations("Neogobius_melanostomus", "Gasterosteus_aculeatus",corr_matrix_list)
 
@@ -263,6 +263,8 @@ get_species_pair_correlations("Scardinius_erythrophthalmus","Gadus_morhua", corr
 get_species_pair_correlations("Coregonus_maraena","Platichthys_flesus", corr_matrix_list)
 get_species_pair_correlations("Coregonus_maraena","Platichthys_flesus", corr_matrix_list)
 
+get_species_pair_correlations("Osmerus eperlanus","Gadus morhua", corr_matrix_list)
+get_species_pair_correlations("Coregonus maraena","Gadus morhua", corr_matrix_list)
 
 ################################################################################
 #load and inspect prediction maps
@@ -274,9 +276,9 @@ binomial_map_binary <- rast("results/prediction_maps/prediction_map_binomial_bin
 
 
 #Species maps
-species <- "Sander_lucioperca"
+species <- "Gadus_morhua"
 
-par(mfrow = c(2, 2), oma = c(0, 0, 3, 0), mar = c(2, 2, 3, 2))
+par(mfrow = c(1, 2), oma = c(0, 0, 3, 0), mar = c(2, 2, 3, 2))
 plot(binomial_map[[species]])
 mtext("Binomial probabilities", side = 3, line = 1, cex = 0.9)
 plot(binomial_map_binary[[species]])
@@ -287,15 +289,44 @@ plot(mvp_map_binary[[species]])
 mtext("MVP presence/absence", side = 3, line = 1, cex = 0.9)
 mtext(text = gsub("_"," ", species), outer = TRUE, line = 0.5, cex = 1.5, font = 2)
 
-# Biodiversity map
+#print all prediction maps comparing model types
+for (idx in 1:length(species_names)) {
+  species <- species_names[idx]
+  
+  png(paste0("results/prediction_maps/", species , "-map_compared.png"),
+      width = 1600, height = 1600, res = 300) 
+  
+  par(mfrow = c(2, 2), oma = c(0, 0, 3, 0), mar = c(2, 2, 3, 2))
+  plot(binomial_map[[species]])
+  mtext("Binomial probabilities", side = 3, line = 1, cex = 0.9)
+  plot(binomial_map_binary[[species]])
+  mtext("Binomial presence/absence", side = 3, line = 1, cex = 0.9)
+  plot(mvp_map[[species]])
+  mtext("MVP probabilities", side = 3, line = 1, cex = 0.9)
+  plot(mvp_map_binary[[species]])
+  mtext("MVP presence/absence", side = 3, line = 1, cex = 0.9)
+  mtext(text = gsub("_"," ", species), outer = TRUE, line = 0.5, cex = 1.5, font = 2)
+  
+  dev.off()
+}
 
+# Biodiversity map for the MVP model
+par(mfrow= c(1,1))
+biodiversity_map <- app(mvp_map_binary, sum)
+plot(biodiversity_map, col = colorRampPalette(c("blue", "white","red", "darkred"))(100))
 
+library(rnaturalearth)
+countries <- ne_countries(scale = "large", returnclass = "sf")
+
+borders <- project(vect(countries), biodiversity_map)
+plot(borders, add=T, col = c("grey"))
 
 
 ################################################################################
-# Feature importance
+# Predictor/Feature importance
 features_binomial <- readRDS("results/final_trained_models/summary_binomial.rds")
 features_mvp <- readRDS("results/final_trained_models/summary_mvp.rds")
+
 
 
 feature_importance <- as.data.frame(features_binomial$importance)%>%
@@ -342,6 +373,63 @@ ggsave("results/plots/predictor_importance_binomial.tiff",
        width = 8, height = 6, dpi = 300, compression = "lzw")
 
 ################################################################################
+#check correlation between ACE values 
+ACE_MVP_scaled <- apply(features_mvp$ACE, 2, scale)
+ACE_bin_scaled <- apply(features_binomial$ACE, 2, scale)
+
+#check correlation between model types approximated linear predictor effects
+ACE_corr <- c()
+for (species in 1:length(species_names)){
+  ACE_corr <- c(ACE_corr,cor(ACE_MVP_scaled[,species],ACE_bin_scaled[,species]))
+}
+names(ACE_corr)<-species_names
+summary(ACE_corr)
+hist(ACE_corr)
+
+#predictornames ordered by feature importance
+ordered_predictor_names <-rownames(sort_by(feature_importance,rowSums(feature_importance)))
+
+#save ACE values of MVP model
+ACE_MVP <- as.data.frame(features_mvp$ACE)
+colnames(ACE_MVP) <- gsub("_", " ", species_names)
+
+#apply the same order as in the feature importance 
+ACE_MVP_long <- ACE_MVP%>%
+  as.matrix()%>%
+  melt()%>%
+  mutate(Var1= gsub("_", " ", Var1))%>%
+  mutate(
+    Var1 = factor(Var1, levels = gsub("_", " ", ordered_predictor_names))
+  )
+
+library(grid)
+ACE_MVP_plot <- ggplot(ACE_MVP_long, aes(x = Var2, y = Var1, fill = value)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  scale_fill_gradientn(
+    colors = c("red", "white", "blue"),
+    values = scales::rescale(c(min(ACE_MVP_long$value),0,max(ACE_MVP_long$value))),
+    limits = c(min(ACE_MVP_long$value),max(ACE_MVP_long$value)),
+    name = "ACE"
+  )+
+  
+  
+  #scale_fill_manual(values = colors, name = NULL) +
+  geom_text(aes(label = ifelse(abs(value)>0.05, sprintf("%.2f", value),"")),
+            size = 2.8, color = "black", fontface = "bold") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 9),
+        axis.text.y = element_text(size = 9),
+        axis.title = element_blank(),
+        #legend.position = "right",
+        panel.grid = element_blank())+
+  coord_fixed()+
+  labs(title = "Average Conditional effect (MVP Model)")
+
+
+ACE_MVP_plot
+
+
+################################################################################
 
 
 
@@ -357,15 +445,15 @@ rowsum(m$sample(100)) # normally distributed with mean=`[0,0]` and covariance_ma
 get_species_pair_correlations("Clupea_harengus", "Gasterosteus_aculeatus", corr_matrix_list)
 get_species_pair_correlations("Clupea_harengus", "Sander_lucioperca", corr_matrix_list)
 get_species_pair_correlations("Clupea_harengus", "Perca_fluviatilis", corr_matrix_list)
-get_species_pair_correlations("Clupea_harengus", "Gadus_morhua", corr_matrix_list)
+get_species_pair_correlations("Clupea harengus", "Gadus morhua", corr_matrix_list)
 get_species_pair_correlations("Clupea_harengus", "Esox_lucius", corr_matrix_list)
 get_species_pair_correlations("Clupea_harengus", "Rutilus_rutilus", corr_matrix_list)
 get_species_pair_correlations("Clupea_harengus", "Sprattus_sprattus", corr_matrix_list)
 
-get_species_pair_correlations("Gasterosteus_aculeatus", "Sander_lucioperca", corr_matrix_list)
-get_species_pair_correlations("Gasterosteus_aculeatus", "Perca_fluviatilis", corr_matrix_list)
-get_species_pair_correlations("Gasterosteus_aculeatus", "Gadus_morhua", corr_matrix_list)
-get_species_pair_correlations("Gasterosteus_aculeatus", "Esox_lucius", corr_matrix_list)
+get_species_pair_correlations("Gasterosteus aculeatus", "Sander lucioperca", corr_matrix_list)
+get_species_pair_correlations("Gasterosteus aculeatus", "Perca fluviatilis", corr_matrix_list)
+get_species_pair_correlations("Gasterosteus aculeatus", "Gadus morhua", corr_matrix_list)
+get_species_pair_correlations("Gasterosteus aculeatus", "Esox lucius", corr_matrix_list)
 get_species_pair_correlations("Gasterosteus_aculeatus", "Sprattus_sprattus", corr_matrix_list)
 get_species_pair_correlations("Gasterosteus_aculeatus", "Rutilus_rutilus", corr_matrix_list)
 
@@ -381,8 +469,8 @@ get_species_pair_correlations("Perca_fluviatilis", "Sprattus_sprattus", corr_mat
 get_species_pair_correlations("Perca_fluviatilis", "Rutilus_rutilus", corr_matrix_list)
 
 get_species_pair_correlations("Gadus_morhua", "Esox_lucius", corr_matrix_list)
-get_species_pair_correlations("Gadus_morhua", "Sprattus_sprattus", corr_matrix_list)
-get_species_pair_correlations("Gadus_morhua", "Rutilus_rutilus", corr_matrix_list)
+get_species_pair_correlations("Gadus morhua", "Sprattus sprattus", corr_matrix_list)
+get_species_pair_correlations("Gadus morhua", "Rutilus rutilus", corr_matrix_list)
 
 get_species_pair_correlations("Esox_lucius", "Sprattus_sprattus", corr_matrix_list)
 get_species_pair_correlations("Esox_lucius", "Rutilus_rutilus", corr_matrix_list)

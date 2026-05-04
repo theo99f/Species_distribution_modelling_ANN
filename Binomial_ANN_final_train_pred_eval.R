@@ -40,6 +40,7 @@ cv_bin_model <- readRDS("results/candidate_models/binomial_ann/CV_models_hidden_
 thr_bin <- get_cv_median_threshold(cv_bin_model)
 
 threshold_matrix_bin <- sapply(cv_bin_model$performance, function(x) x["threshold", ])
+write.csv(cbind(threshold_matrix_bin,thr_bin), "results/final_trained_models/threshold_binomial.csv")
 
 ################################################################################
 # Test set evaluation
@@ -88,9 +89,6 @@ write.csv(AUC_cv,
           "results/final_trained_models/AUC_bin_performance_uncertainty_crossvalidation.csv")
 write.csv(TSS_cv, 
           "results/final_trained_models/TSS_bin_performance_uncertainty_crossvalidation.csv")
-################################################################################
-#saving out-of-fold predictions
-
 
 ################################################################################
 #saving predictions on the whole data set using the final model for co-occurrence analysis
@@ -158,7 +156,7 @@ dim(xy_valid_cells)
 ANN_predictor_map <- map_predictors_scaled[valid_rows, predictor_names]
 
 #removing unnecessary variables for memory capacity
-rm(map_predictors_scaled, map_predictors, predictor_stack, valid_rows, cv_bin_model)
+rm(map_predictors_scaled, map_predictors, predictor_stack, valid_rows, cv_bin_model, full_response)
 gc()
 
 ################################################################################
@@ -179,13 +177,12 @@ terra::writeRaster(prediction_map_binomial,
 
 ################################################################################
 #binary prediction maps
-
 prediction_map_binomial_binary <- predict_map(binomial_ann, 
                                        ANN_predictor_map, 
                                        xy_valid_cells,
                                        presence = T,
                                        threshold =  thr_bin,
-                                       batch_size = 10000) 
+                                       batch_size = 30000) 
 prediction_map_binomial_binary <- rast(prediction_map_binomial_binary)
 names(prediction_map_binomial_binary) <- species_names
 
