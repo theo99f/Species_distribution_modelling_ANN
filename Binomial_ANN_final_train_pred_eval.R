@@ -104,14 +104,36 @@ gc()
 
 
 #plotting and saving Accumulated local effect plots to determine predictor effects
+library(patchwork)
+library(ggplot2)
+short_names <- sub("^([A-Za-z])[a-z]+_", "\\1. ", species_names)
+short_names <- gsub("_", " ", short_names)
+
 for (pred in 1:length(predictor_names)) {
-  png(paste0("results/plots/binomial/", predictor_names[pred], "_binomial.png"),
-      width = 8000, height = 1200)  # Very wide, less tall
+  ale <- ALE(binomial_ann, variable = predictor_names[pred])
   
-  ALE(binomial_ann, variable = predictor_names[pred])
+  plots <- lapply(seq_along(ale), function(i){
+    ale[[i]] +
+      ggtitle(short_names[i]) +
+      theme(
+        plot.title = element_text(
+          size = 8,
+          face = "italic",
+          hjust = 0.5
+        ),
+        legend.position = "none",
+        axis.title = element_blank()
+      )
+  })
   
-  dev.off()
+
+  ggsave(paste0("results/plots/binomial/",predictor_names[pred],".tiff"),
+         wrap_plots(plots, ncol = 5),
+         width = 8, height = 10, dpi = 300, compression = "lzw")
 }
+
+
+################################################################################
 
 #saving feature importance
 feature_importance_ann <- summary(binomial_ann)

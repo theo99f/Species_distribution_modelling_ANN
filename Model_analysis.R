@@ -1,10 +1,12 @@
 ################################################################################
 #                                Model Analysis                                #
-#                                                                              #
+################################################################################
+
 source("Functions.R")
 library(ggplot2)
 library(reshape2)
 library(patchwork)
+library(terra)
 
 binomial_ann <- readRDS("results/final_trained_models/binomial_ann")
 mvp_ann <- readRDS("results/final_trained_models/mvp_ann")
@@ -32,7 +34,7 @@ rowMeans(gillnet_test_eval)
 #                        Correlation Decompositon                              #
 
 # Compare Correlations of Raw observed data, Correlations in environmental predicted 
-# occurences and residual co-occurence patterns
+# occurences and residual co-occurrence patterns
 ################################################################################
 #look at correlations between species in the predicted data
 whole_response_dataset <- read.csv("data/raw_data/final_raw_dataset/fish_observations_wide.csv")
@@ -45,7 +47,7 @@ colnames(whole_response_dataset) <- gsub("_", " ",species_names)
 observed_correlation <- cor(whole_response_dataset)
 p1 <- create_heatmap(observed_correlation, title = "A) Observed (Binary Data)")
 
-#################################################################################
+################################################################################
 #look at correlations between species in the predicted data
 predictions_dataset_mvp <- read.csv("results/community_analysis/predicted_community_mvp.csv", row.names = 1)
 colnames(predictions_dataset_mvp) <- gsub("_", " ",species_names)
@@ -97,7 +99,7 @@ predictions_test_set <- read.csv("results/community_analysis/predicted_community
 colnames(predictions_test_set) <- gsub("_", " ",species_names)
 predicted_correlation_gillnet <- cor(predictions_test_set)
 
-p2g <- create_heatmap(predicted_correlation_gillnet, title = "Environmental (Predicted Probabilities)", scale = "B")
+p2g <- create_heatmap(predicted_correlation_gillnet, title = "B) Environmental (Predicted Probabilities)", scale = "B")
 
 #check the covariance matrix of the joint species distribution model
 # Mg is the latent factor matrix used to construct the covariance matrix
@@ -108,22 +110,40 @@ colnames(residual_correlation_gillnet) <- gsub("_", " ",species_names)
 rownames(residual_correlation_gillnet) <- gsub("_", " ",species_names)
 
 p3g <- create_heatmap(residual_correlation_gillnet, 
-                      title = "Residual Co-occurence Pattern (Covariance matrix)")
+                      title = "C) Residual Co-occurence Pattern (Covariance matrix)")
 
 
 #save a combined plot
-ggsave("results/plots/correlation_decomposition_gillnet.tiff", 
-       p1g / p2g / p3g , 
-       width = 8, 
-       height = 18, 
+ggsave("results/plots/correlation_decomposition_gillnet_horizontal.tiff", 
+       p1g + p2g + p3g , 
+       width = 18, 
+       height = 8, 
        dpi = 300,
        compression = "lzw")
+
+write.csv(as.data.frame(observed_correlation_gillnet), "results/community_analysis/correlation_observed_data.csv")
+write.csv(as.data.frame(predicted_correlation_gillnet), "results/community_analysis/correlation_predicted_data.csv")
+write.csv(as.data.frame(residual_correlation_gillnet), "results/community_analysis/correlation_residual_data.csv")
+
+################################################################################
+#check similarity
+install.packages("evolqg")
+library(evolqg)
+
+cor_mats <- list(observed_correlation, predicted_correlation,residual_correlation)
+
+
+# Or, put them in a list to compare all at once
+cor_mats <- list(observed_correlation_gillnet, predicted_correlation_gillnet,residual_correlation_gillnet)
+all_similarities <- PCAsimilarity(cor_mats)
+
+print(all_similarities)
 
 ################################################################################
 # Reinforcing vs. counteracting relationships between environment and residuals
 # i.e. that change from positive to negative 
 relationship_cor <- function(res, env, prob = 0, 
-                         title = "Reinforcing and counteracting species associations\n- environmentals vs residual components", 
+                         title = "Reinforcing and counteracting species associations\n- environmental vs residual components", 
                          colors = c("darkblue", "darkred", "lightgrey", "darkorange", "#4682B4")){
   # filter weak relationships 
   res <- ifelse(abs(res) < quantile(abs(res[upper.tri(res)]), probs = prob), 0, res)
@@ -218,7 +238,7 @@ get_top_correlations <- function (n=10, cor_matrix){
   }
   return(top_corr)
 }
-ALE()
+
 
 #inspect the highest correlations
 get_top_correlations(n= 15, cor_matrix=residual_correlation_gillnet)
@@ -238,7 +258,7 @@ overall_residual_correlation <- data.frame(
 colMeans(overall_residual_correlation)
 write.csv(overall_residual_correlation, "results/community_analysis/average_residual_correlations.csv")
 
-
+################################################################################
 #Interesting residual relationship
 #counteracting co-occurrence -/+
 minus_plus_rel <- ifelse(predicted_correlation_gillnet <0 & residual_correlation_gillnet>0,residual_correlation_gillnet,0)
@@ -310,17 +330,67 @@ for (idx in 1:length(species_names)) {
   dev.off()
 }
 
+################################################################################
 # Biodiversity map for the MVP model
 par(mfrow= c(1,1))
 biodiversity_map <- app(mvp_map_binary, sum)
 plot(biodiversity_map, col = colorRampPalette(c("blue", "white","red", "darkred"))(100))
 
+terra::writeRaster(biodiversity_map, 
+                   "results/prediction_maps/biodiversity_map.tif", 
+                   overwrite = TRUE)
+
 library(rnaturalearth)
 countries <- ne_countries(scale = "large", returnclass = "sf")
 
 borders <- project(vect(countries), biodiversity_map)
-plot(borders, add=T, col = c("grey"))
+plot(borders, add=T)
 
+###############################################################################
+#investigating differences in predictions
+difference_predictions <-abs(mvp_map-binomial_map)
+plot(difference_predictions)
+mean_abs_difference <- global(difference_predictions, fun = "mean", na.rm=T)
+summary(mean_abs_difference)
+hist(mean_abs_difference$mean)
+
+binary_difference_predictions <-abs(mvp_map_binary-binomial_map_binary)
+percentage_difference <- global(binary_difference_predictions, fun = "mean", na.rm=T)
+
+
+prediction_diff <- data.frame(difference = percentage_difference$mean*100,
+                              species = gsub("_", " ",species_names))
+
+#create a barplot showing the prediction differences
+pred_diff_plot <- ggplot(prediction_diff, aes(x = reorder(species,-difference), y = difference, 
+                            label=sprintf("%.1f", difference),
+                            fill = difference)) +
+  
+  geom_hline(aes(yintercept = mean(difference),
+                 color = "Mean prediction difference across species"),
+             linewidth = 1)+
+  scale_color_manual(
+    name = NULL,
+    values = c("Mean prediction difference across species" = "red")
+  )+theme(legend.position = c(0.95, 0.95), 
+          legend.justification = c("right", "top"))   +
+  geom_col(col="black")+
+  scale_fill_gradientn(
+    colors = c("white", "darkred"),
+    limits = c(-1, 25),
+    guide = "none"
+  )+
+  ylab("Difference between model predictions (%)")+
+  xlab(NULL)+
+  #scale_y_continuous(limits = c(0, NA))+
+  scale_y_continuous(expand = expansion(mult = c(0, 0.18)))+
+  geom_text(position = position_nudge(y=-0.35))+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 11),
+        axis.ticks.x = element_blank())
+# Save plot
+ggsave("results/plots/prediction_differences_plot.tiff",
+       pred_diff_plot,
+       width = 9, height = 7, dpi = 300, compression = "lzw")
 
 ################################################################################
 # Predictor/Feature importance
@@ -435,12 +505,6 @@ ACE_MVP_plot
 
 
 
-
-
-
-m <- distr_multivariate_normal(torch_zeros(25), torch_tensor(residual_correlation))
-rowsum(m$sample(100)) # normally distributed with mean=`[0,0]` and covariance_matrix=`I`
-
 ##################################################################################
 get_species_pair_correlations("Clupea_harengus", "Gasterosteus_aculeatus", corr_matrix_list)
 get_species_pair_correlations("Clupea_harengus", "Sander_lucioperca", corr_matrix_list)
@@ -456,6 +520,7 @@ get_species_pair_correlations("Gasterosteus aculeatus", "Gadus morhua", corr_mat
 get_species_pair_correlations("Gasterosteus aculeatus", "Esox lucius", corr_matrix_list)
 get_species_pair_correlations("Gasterosteus_aculeatus", "Sprattus_sprattus", corr_matrix_list)
 get_species_pair_correlations("Gasterosteus_aculeatus", "Rutilus_rutilus", corr_matrix_list)
+get_species_pair_correlations("Gasterosteus_aculeatus", "", corr_matrix_list)
 
 get_species_pair_correlations("Sander_lucioperca", "Perca_fluviatilis", corr_matrix_list)
 get_species_pair_correlations("Sander_lucioperca", "Gadus_morhua", corr_matrix_list)

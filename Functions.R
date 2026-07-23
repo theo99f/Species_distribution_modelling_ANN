@@ -126,7 +126,6 @@ evaluate_model_fixed_threshold <- function(model,
 }
 
 
-
 # Helper function to extract species-specific thresholds aggregated across CV folds.
 # Takes a CV model object (as returned by cross_validate_ann) and returns
 # the median threshold per species across all folds.
@@ -308,7 +307,7 @@ create_heatmap <- function(cor_matrix,
 
 #function to manually predict for the MVP model by extracting its saved weights
 #function becomes necessary as cito's own predict function fails after reloading
-#the 
+#the model object
 predict_mvp_manual <- function(X, model, species_names) {
   X <- as.matrix(X)
   
@@ -337,12 +336,90 @@ predict_mvp_manual <- function(X, model, species_names) {
   colnames(probs) <- species_names
   return(probs)
 }
-#verify that manual predict function gives the same results as cito's own predict function
-pred_dataset <- read.csv("results/community_analysis/predicted_community_mvp.csv")
-mvp_ann <- readRDS("results/final_trained_models/mvp_ann")
-predict_mvp_manual(train_set_predictors[20,], mvp_ann, species_names = species_names)
-pred_dataset[20,]
 
-mvp_ann$use_model_epoch
-mvp_ann$weights
+#verify that manual predict function gives the same results as cito's own predict function
+pred_dataset <- read.csv("results/community_analysis/predicted_community_mvp.csv", row.names = 1)
+mvp_ann <- readRDS("results/final_trained_models/mvp_ann")
+
+for (x in 1:100) {
+  manual_pred <- predict_mvp_manual(train_set_predictors[x,], mvp_ann, species_names = species_names)
+  cito_pred <- unlist(pred_dataset[x,])
+  
+  print(mean((manual_pred-cito_pred)**2))
+}
+
+
+
+#function to predict probabilities of species compositions (for single locations!!!)
+#composition should be a vector of length 25:
+#with 1 for species that should be present, 0 for species that should be absent and NA for species that can be ignored
+predict_jointly <- function(X, model, composition, species_names) {
+  X <- as.matrix(X)
+  
+  #create the covariance matrix
+  M <- model$parameter$parameter
+  covariance <- M%*%t(M) + diag(1, length(species_names))
+  
+  #check how the user choose to input the species composition and convert to a condition
+  if(length(composition) == 25 && all(is.element(composition, c(0L, 1L, NA)))){
+    condition <- composition
+  }else if(is.list(composition)){
+    condition <- sapply(species_names, function(s){
+      if(s %in% names(composition)){
+        composition[[s]]
+      }else{NA}
+      
+    }, simplify = T)
+    
+  }else{stop("wrong input of composition to predict")}
+  
+  # Get network weights from saved model
+  W1 <- model$weights[[2]]$`0.weight`
+  b1 <- model$weights[[2]]$`0.bias`
+  alpha1 <- model$weights[[2]]$`1.weight`
+  
+  W2 <- model$weights[[2]]$`2.weight`
+  b2 <- model$weights[[2]]$`2.bias`
+  alpha2 <- model$weights[[2]]$`3.weight`
+  
+  W3 <- model$weights[[2]]$`4.weight`
+  b3 <- model$weights[[2]]$`4.bias`
+  
+  # Forward pass
+  z1 <- X %*% t(W1) + matrix(b1, nrow(X), length(b1), byrow = TRUE)
+  h1 <- ifelse(z1 > 0, z1, alpha1 * z1)
+  
+  z2 <- h1 %*% t(W2) + matrix(b2, nrow(h1), length(b2), byrow = TRUE)
+  h2 <- ifelse(z2 > 0, z2, alpha2 * z2)
+  
+  #network output (environmental suitability)
+  logits <- h2 %*% t(W3) + matrix(b3, nrow(h2), length(b3), byrow = TRUE)
+  
+  #create multivariate distribution with the environmental suitability as mean
+  draw <- distr_multivariate_normal(torch_tensor(logits), torch_tensor(covariance))
+  x <- draw$sample(10000) # draw x monte carlo samples from the multivariate distribution
+  
+  #convert to presence/absence
+  binary_occurrence <- torch_where(x>0, 1,0) #if else for torch
+  binary_array <- as.array(torch_squeeze(binary_occurrence))
+  
+  
+  check <- apply(binary_array, 1, function(n){
+    #check if specified species presences and absences are matched
+    match <- ifelse(is.na(condition), NA, ifelse(n==condition, 1, 0)) #keep NA for species that are not asked for
+    
+    #check whether the whole joint probability condition is met
+    condition_check <- sum(match, na.rm = T)==sum(!is.na(match))
+    
+    return(condition_check)
+    })
+  
+  #return probability as the proportion of samples that met the composition
+  probability <- mean(check)
+  return(probability)
+}
+
+
+
+
 
