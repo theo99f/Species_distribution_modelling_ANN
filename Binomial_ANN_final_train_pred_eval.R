@@ -115,6 +115,8 @@ for (pred in 1:length(predictor_names)) {
   plots <- lapply(seq_along(ale), function(i){
     ale[[i]] +
       ggtitle(short_names[i]) +
+      labs(x=paste("(scaled)", gsub("_", " ", predictor_names[pred])),
+           y ="ALE")+
       theme(
         plot.title = element_text(
           size = 8,
@@ -122,7 +124,7 @@ for (pred in 1:length(predictor_names)) {
           hjust = 0.5
         ),
         legend.position = "none",
-        axis.title = element_blank()
+        axis.title = element_text(size=6)
       )
   })
   
