@@ -20,24 +20,24 @@ Parallel model pipelines are indicated with letter suffixes (e.g. 05a, 05b).
 All scripts source `Functions.R` for shared functions and variables.
 Results are saved to `results/` and data is stored in `data/` (not included).
 
-###Preprocessing & Setup 
+---Preprocessing & Setup---
 - 00_model_exploration.R                   # Initial exploration and prototyping using a subset of 5 species
 - 01_data_preprocessing_and_split.R        # Data cleaning and predictor preparation (Splitting development data and independent test data)
 - 02_cross_validation_folds.R              # Grouped spatial cross-validation setup (balances presence/absence data in 5-folds and saves fold indices for use across models and scripts)
 - 03_dataset_exploration.R                 # Exploratory dataset analysis (independent of ML pipeline)
 
 
-###Model Tuning 
+---Model Tuning---
 - 04a_binomial_ANN_tuning.R                # Hyperparameter tuning — binomial model: iterative random search with different numbers of configurations due to computational restrictions
 - 04b_MVP_ANN_tuning.R                     # Hyperparameter tuning — MVP model: iterative random search with different numbers of configurations due to computational restrictions
 
-###Model Training, Prediction & Evaluation 
+---Model Training, Prediction & Evaluation---
 - 05a_binomial_ANN_final_train_pred_eval.R # Binomial ANN — full pipeline
 - 05b_MVP_ANN_final_train_pred_eval.R      # MVP ANN — full pipeline
 - 05c_gillnet_MVP_model.R                  # Gillnet MVP model (no tuning)
 - 05d_CNN_model.R                          # CNN architecture (experimental, no tuning)
 
-###Analysis & Visualisation
+---Analysis & Visualisation---
 - 06_model_analysis.R                      # Model comparison and interpretation
 - 07_species_performance_plot.R            # Species-level performance visualisation
 - 08_ensemble_cv_predictions.R             # Cross-validated ensemble predictions for MVP model
@@ -50,8 +50,7 @@ Results are saved to `results/` and data is stored in `data/` (not included).
 
 ## Data
 Raw and processed data were offered by the PROTECT BALTIC project and are not included due to licensing restrictions.
-Environmental predictor variables were derived from satellite products 
-and processed as spatial raster data using the terra package in R.
+Environmental predictor variables were processed as spatial raster data using the terra package in R.
 Contact theo.froese@proton.me for further information.
 
 ## Reproducing the Analysis
@@ -74,11 +73,13 @@ To restore the environment: renv::restore()
 
 ## Dependencies
 R version > 4.4
+
 Main R packages: cito, terra, rsample, torch, ggplot2
+
 Full dependency list: renv.lock
 
 
 
 ## Contact
-Theophil Fröse
+Theophil Fröse:
 theo.froese@proton.me
