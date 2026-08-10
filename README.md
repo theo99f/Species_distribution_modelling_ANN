@@ -13,15 +13,13 @@ types are implemented: an independent binomial ANN and a joint
 Multivariate Probit (MVP) ANN that accounts for residual covariance 
 among species.
 
-## Repository Structure
+## Repository Structure/Scripts
 
-├── Functions.R                              # Shared functions across all scripts
+- Functions.R                              # Shared functions across all scripts
 
-│
+####Preprocessing & Setup 
 
-│   --- Preprocessing & Setup ---
-
-├── 00_model_exploration.R                   # Initial exploration and prototyping using a subset of 5 species
+- 00_model_exploration.R                   # Initial exploration and prototyping using a subset of 5 species
 
 ├── 01_data_preprocessing_and_split.R        # Data cleaning and predictor preparation (Splitting development data and independent test data)
 
