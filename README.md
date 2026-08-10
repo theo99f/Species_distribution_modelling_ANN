@@ -16,12 +16,19 @@ among species.
 ## Repository Structure
 
 ├── Functions.R                              # Shared functions across all scripts
+
 │
+
 │   --- Preprocessing & Setup ---
+
 ├── 00_model_exploration.R                   # Initial exploration and prototyping using a subset of 5 species
+
 ├── 01_data_preprocessing_and_split.R        # Data cleaning and predictor preparation (Splitting development data and independent test data)
+
 ├── 02_cross_validation_folds.R              # Grouped spatial cross-validation setup (balances presence/absence data in 5-folds and saves fold indices for use across models and scripts)
+
 ├── 03_dataset_exploration.R                 # Exploratory dataset analysis (independent of ML pipeline)
+
 │
 │   --- Model Tuning ---
 ├── 04a_binomial_ANN_tuning.R                # Hyperparameter tuning — binomial model: iterative random search with different numbers of configurations due to computational restrictions
