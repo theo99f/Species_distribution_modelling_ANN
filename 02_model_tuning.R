@@ -10,118 +10,15 @@ library(terra)
 library(dplyr)
 library(tidyr)
 library(pROC)
-
-source("Functions.R")
-
-#loading preprocessed development set
-directory <- "data/preprocessed_data/final_data_split/development_set/"
-train_set_predictors <- read.csv(paste0(directory,"train_set_predictors.csv"))
-full_response <- read.csv(paste0(directory,"train_set_response.csv"))
-
-predictor_names <- colnames(train_set_predictors)
-species_names <- colnames(full_response)[6:30]
-
-train_set_response <- full_response %>%
-  select(all_of(species_names))
-
-################################################################################
-#                        Hyperparameter Screening                              #
-################################################################################
-#using standard 3-fold cross-validation with a broad range of hyperparameters
-model_hp_screening <- dnn(X=train_set_predictors, 
-                          Y=cbind(train_set_response), 
-                          loss = "mvp",
-                          validation = 0.1,
-                          early_stopping = 15,
-                          epochs = 200,
-                          activation = "prelu",
-                          lr_scheduler = config_lr_scheduler("reduce_on_plateau", 
-                                                             patience = 5, factor = 0.5),
-                          lr =tune(),
-                          hidden = tune(lower = c(10L,1L), upper = c(50L,4L)),
-                          batchsize = tune(16,64),
-                          lambda = tune(0.0001,0.1),
-                          alpha =tune(0, 0.5),
-                          tuning = config_tuning(CV = 3, steps = 10))          
-#Hyper-parameter configurations
-hp_tuning <- model_hp_screening$tuning
-#sort the hyper-parameter configuration models by the validation loss 
-#and save width and depth of hidden layers in separate columns
-hp_sorted <- hp_tuning %>%
-  mutate(
-    hidden_width = sapply(hidden, `[`, 1),
-    hidden_layers = sapply(hidden, `[`, 2),
-    converged = ifelse(is.infinite(test),0,1)
-  ) %>%
-  select(-hidden)%>%
-  sort_by(hp_tuning$test)
-
-# write to CSV
-write.csv(hp_sorted, "results/hyperparameter_screening_mvp.csv", row.names = FALSE)   
-
-#investigating hyperparameter effects on the validation loss
-hp_sorted <- read.csv("results/hyperparameter_screening_mvp.csv")
-#no significant effect of learning rate
-cor.test(hp_sorted$lr, hp_sorted$test, method = "pearson")
-mean(hp_sorted$lr)
-
-#no significant effect of alpha
-cor.test(hp_sorted$alpha[!is.infinite(hp_sorted$test)], 
-         hp_sorted$test[!is.infinite(hp_sorted$test)], method = "pearson")
-
-#significant effect of lambda (negative correlation with loss)
-cor.test(hp_sorted$lambda[!is.infinite(hp_sorted$test)], 
-         hp_sorted$test[!is.infinite(hp_sorted$test)], method = "pearson")
-#no significant effect of lambda when eliminating the last configuration with the
-#highest loss that additionally used a high unstable learning rate. This configuration
-#is therefore considered as an outlier 
-cor.test(hp_sorted$lambda[1:9], 
-         hp_sorted$test[1:9], method = "pearson")
-
-#no significant effect of batch size
-cor.test(hp_sorted$batchsize[!is.infinite(hp_sorted$test)], 
-         hp_sorted$test[!is.infinite(hp_sorted$test)], method = "pearson")
-
-#no significant effect of network width 
-cor.test(hp_sorted$hidden_width[!is.infinite(hp_sorted$test)], 
-         hp_sorted$test[!is.infinite(hp_sorted$test)], method = "pearson")
-
-#no significant effect of network depth 
-cor.test(hp_sorted$hidden_layers[!is.infinite(hp_sorted$test)], 
-         hp_sorted$test[!is.infinite(hp_sorted$test)])
-
-
-################################################################################
-#                    MVP Hyperparameter Exploration                            #
-#                                                                              #
-# Note: Initial exploration (configs below) used LR 0.3-0.7 based on           #
-# Cito screening that didnt test lower learning rates and therefore showed no  #
-# significant effects of learning rate. Possible bias excluding low lambda due #
-# to one configuration with combined low lambda and high learning rates biased #
-# the following attempted optimization. Training analysis revealed instability #
-# but only when attempting to fit candidate models after use of the parallel   #
-# loop. Therefore this section was called Hyperparameter exploration as they   #
-# were NOT used for deciding the final candidate models.                       #
-# These exploratory results informed only LR requirements but were not used    #
-#                                                                              #
-# The revised section for Hyperparameter optimization with lower LR starts at  #
-# line 420 (MVP Hyperparameter optimization section below).                    #
-################################################################################
-
-# Exploratory Round 1 (n=20, LR 0.3-0.7)
-
-# Random search hyperparameter tuning with 5-fold cross-validation in parallel loop
-
-cv_split_folder <- "data/preprocessed_data/final_data_split/development_set/5-fold_grouped_cv_split/"
-cv_indices <- readRDS(paste0(cv_split_folder,"grouped_5fold_cv_indeces.rds")) 
-
-
 library(parallel)
 library(foreach)
 library(doParallel)
 
+source("Functions.R")
+
+# Random search hyperparameter tuning with 5-fold cross-validation in parallel loop
 # Setup parallel backend
-n_cores <- 3
+n_cores <- detectCores()-1
 cl <- makeCluster(n_cores)
 registerDoParallel(cl)
 
@@ -137,43 +34,55 @@ clusterEvalQ(cl, {
   library(pROC)
 })
 
-# Parallel loop
-results_list <- foreach(config = 1:20, 
+# Parallel loop for random search hyperparameter tuning
+results_list <- foreach(config = 1:3, 
                         .errorhandling = "pass") %dopar% {
-                          
-                          # Generate config
+                          #random sampling of a configuration
                           configs <- list(
                             loss = "mvp",
-                            hidden = c(sample(10:45, sample(1:3, 1))),
-                            lambda = runif(1, 0.01, 0.15),
-                            alpha = runif(1, 0, 0.5),
-                            lr = runif(1, 0.3, 0.7),
-                            batchsize = sample(16:64, 1)
+                            hidden = c(sample(15:45, sample(1:3, 1))),
+                            lambda = 10^-(runif(1, 1, 6)),
+                            alpha = runif(1, 0, 1),
+                            #log uniform distribution between 0.001 and 0.1
+                            lr = 10^-(runif(1, 1, 3)),
+                            batchsize = sample(16:96, 1)
                           )
-                          
-                          # Cross-validate
-                          model <- cross_validate_ann(configs, train_set_predictors, 
-                                                      train_set_response, cv_indices)
-                          
-                          # Extract metrics
-                          auc_by_fold <- sapply(model$performance, function(x) mean(x["AUC_species", ]))
-                          tss_by_fold <- sapply(model$performance, function(x) mean(x["TSS_species", ]))
-                          
-                          # Calculate means across folds
-                          mean_AUC <- mean(auc_by_fold)
-                          mean_TSS <- mean(tss_by_fold)
-                          
-                          # Format output - ensure all values are scalar
-                          result <- list(
-                            loss = configs$loss,
-                            hidden = paste0(configs$hidden, collapse = ","),
-                            lambda = configs$lambda,
-                            alpha = configs$alpha,
-                            lr = configs$lr,
-                            batchsize = configs$batchsize,
-                            mean_AUC = mean_AUC,
-                            mean_TSS = mean_TSS
-                          )
+                          #
+                          result <- tryCatch({
+                            model <- cross_validate_ann(configs, train_set_predictors, 
+                                                        train_set_response, cv_indices)
+                            
+                            auc_by_fold <- sapply(model$performance, function(x) mean(x["AUC_species", ]))
+                            tss_by_fold <- sapply(model$performance, function(x) mean(x["TSS_species", ]))
+                            
+                            list(
+                              loss = configs$loss,
+                              hidden = paste0(configs$hidden, collapse = ","),
+                              lambda = configs$lambda,
+                              alpha = configs$alpha,
+                              lr = configs$lr,
+                              batchsize = configs$batchsize,
+                              mean_AUC = mean(auc_by_fold),
+                              sd_AUC = sd(auc_by_fold),
+                              mean_TSS = mean(tss_by_fold),
+                              sd_TSS = sd(tss_by_fold),
+                              status = "ok"
+                            )
+                          }, error = function(e) {
+                            list(
+                              loss = configs$loss,
+                              hidden = paste0(configs$hidden, collapse = ","),
+                              lambda = configs$lambda,
+                              alpha = configs$alpha,
+                              lr = configs$lr,
+                              batchsize = configs$batchsize,
+                              mean_AUC = NA,
+                              sd_AUC = NA,
+                              mean_TSS = NA,
+                              sd_TSS = NA,
+                              status = paste("error:", conditionMessage(e))
+                            )
+                          })
                           
                           return(result)
                         }
@@ -190,7 +99,10 @@ results_df <- do.call(rbind, lapply(results_list, function(x) {
     lr = x$lr,
     batchsize = x$batchsize,
     mean_AUC = x$mean_AUC,
+    sd_AUC = x$sd_AUC,
     mean_TSS = x$mean_TSS,
+    sd_TSS = x$sd_TSS,
+    status = x$status,
     stringsAsFactors = FALSE
   )
 }))
@@ -224,38 +136,7 @@ configuration <- configuration %>%
   )%>%
   sort_by(configuration$mean_AUC)
 
-#lambda significant, negative correlated with performance
-cor.test(configuration$lambda, configuration$mean_AUC, method = "pearson")
-cor.test(configuration$lambda, configuration$mean_TSS, method = "pearson")
 
-#learning rate not significant
-cor.test(configuration$lr, configuration$mean_AUC, method = "pearson")
-cor.test(configuration$lr, configuration$mean_TSS, method = "pearson")
-
-#layer width not significant among one hidden layer models
-cor.test(as.numeric(configuration$layer1[!is.na(configuration$layer2)]), 
-         configuration$mean_AUC[!is.na(configuration$layer2)], method = "pearson")
-cor.test(as.numeric(configuration$layer1[!is.na(configuration$layer2)]), 
-         configuration$mean_TSS[!is.na(configuration$layer2)], method = "pearson")
-
-#significant correlation between number of layers and performance
-cor.test(configuration$n_layers, configuration$mean_AUC)
-cor.test(configuration$n_layers, configuration$mean_TSS)
-
-#no significant difference between one and two layers
-wilcox.test(mean_AUC~n_layers,configuration[is.na(configuration$layer3),])
-wilcox.test(mean_TSS~n_layers,configuration[is.na(configuration$layer3),])
-
-#alpha not significant
-cor.test(configuration$alpha, configuration$mean_AUC, method = "pearson")
-cor.test(configuration$alpha, configuration$mean_TSS, method = "pearson")
-
-#batchsize not significant
-cor.test(configuration$batchsize, configuration$mean_AUC, method = "pearson")
-cor.test(configuration$batchsize, configuration$mean_TSS, method = "pearson")
-
-#lambda is likely between 0.01 and 0.04
-#hidden layers likely between 1 and 2
 
 # Exploratory Round 2 (n=10, LR 0.3-0.7, narrowed ranges)  
 library(parallel)

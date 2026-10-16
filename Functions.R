@@ -6,22 +6,119 @@ library(dplyr)
 library(torch)
 library(cito)
 
-#loading preprocessed development set
-directory <- "data/preprocessed_data/final_data_split/development_set/"
-train_set_predictors <- read.csv(paste0(directory,"train_set_predictors.csv"))
-full_response <- read.csv(paste0(directory,"train_set_response.csv"))
+# Define path for saving preprocessed dataset
+folder <- file.path("data","preprocessed_split_data")
+cv_split_folder <- file.path(folder, "cross_validation_folds")
 
-#saving the predictor and species names to make them available across scripts
-predictor_names <- colnames(train_set_predictors)
-species_names <- colnames(full_response)[6:30]
-
-train_set_response <- full_response %>%
-  dplyr::select(all_of(species_names))
+# Create directory if it doesn't exist
+if (!dir.exists(cv_split_folder)) {
+  dir.create(cv_split_folder, recursive = TRUE)
+}
 
 
+#loading preprocessed development set and the predictor and species names to
+#make them available across scripts if the split was created already
+if (file.exists(file.path(folder, "train_set_predictors.csv"))) {
+  train_set_predictors <- read.csv(file.path(folder, "train_set_predictors.csv"))
+  predictor_names <- colnames(train_set_predictors)
+}
+if (file.exists(file.path(folder, "train_set_response.csv"))) {
+  train_set_response <- read.csv(file.path(folder, "train_set_response.csv"))
+  species_names <- colnames(train_set_response)
+}
 #loading the indices of the grouped cross-validation split
-cv_split_folder <- "data/preprocessed_data/final_data_split/development_set/5-fold_grouped_cv_split/"
-cv_indices <- readRDS(paste0(cv_split_folder,"grouped_5fold_cv_indeces.rds")) 
+if (file.exists(file.path(cv_split_folder, "grouped_5fold_cv_indeces.rds"))) {
+  cv_indices <- readRDS(file.path(cv_split_folder, "grouped_5fold_cv_indeces.rds"))
+}
+
+################################################################################
+# Balanced Split function for presence/absence data
+
+################################################################################
+# function performs a grouped split for initial test/development set or 
+# cross-validation folds and returns the most balanced split object (rsample)
+
+# response_set: presence/absence data set that should be split
+# type: "initial" for initial split requires prop
+#       "cv"  for cross-validation split requires k
+# n: times to perform the split
+# k: number of cv-folds
+# prop: proportion of the initial 
+balanced_grouped_stratified_split <- function(response_set,
+                                     type = c("initial", "cv"),
+                                     n,
+                                     k,
+                                     prop = 0.8) {
+  library(rsample)
+  library(broom)
+  #prevalence: mean presence of species in the whole data set
+  p_s <- colMeans(response_set)
+  
+  #logic to handle different split types initial vs. cross-validation
+  #defines the split function depending on the prompted split type for the use 
+  #the main loop. Returns the split and split-summaries for balance calculation 
+  #in the main loop
+  if (type == "initial") {
+    split_function <- function(){
+      split <- group_initial_split(response_set, group = "cell", prop = prop)
+      
+      development_data <- training(split)%>%
+        select(all_of(species_names))
+      test_data <- testing(split)%>%
+        select(all_of(species_names))
+      #create a list that stores for each fold k:
+      #   n_k   - the number of observations in the fold
+      #   p_sk  - mean presence of each species in the fold
+      presence_species_folds <- list(
+        list(n_k = nrow(development_data), p_sk = colMeans(development_data)),
+        list(n_k = nrow(test_data), p_sk = colMeans(test_data))
+      )
+      return(list(split=split, folds=presence_species_folds))
+    }
+  }
+  else{
+    split_function <- function() {
+      #perform a split
+      split <- group_vfold_cv(response_set, group = "cell" , v = k)
+      #create a list that stores for each fold k:
+      #   n_k   - the number of observations in the fold
+      #   p_sk  - mean presence of each species in the fold
+      presence_species_folds <- list()
+      for (fold in 1:k) {
+        val_set <- assessment(split$splits[[fold]])
+        presence_species_folds[[fold]] <- list(n_k = nrow(val_set), p_sk = colMeans(val_set))
+      }
+      return(list(split=split, folds=presence_species_folds))
+    }
+  }
+  
+  #initial metric value to determine presence balance-will be low for good balance
+  fold_balance_metric <- Inf
+  
+  #MAIN LOOP
+  for (s in 1:n) {
+    #split the data grouped by cell
+    curr_split <- split_function()
+    #calculate penalty metric for balance:
+    #each folds k squared presence deviation from the overall species prevalence
+    #normalized by species' presence/absence Bernoulli Variance
+    folds_balance <- lapply(curr_split$folds, function(fold) {
+      penalty_sk <- (fold$n_k * (fold$p_sk - p_s)^2) / ((1 - p_s) * p_s)
+      return(penalty_sk[!names(penalty_sk) %in% "cell"])
+      })
+      #sum over folds and species
+      curr_split_balance <- sum(sapply(folds_balance, sum))
+      print(curr_split_balance)
+      
+      if (curr_split_balance < fold_balance_metric) {
+        fold_balance_metric <- curr_split_balance
+        balanced_split <- curr_split$split
+      }
+    }
+    return(balanced_split)
+  }
+
+
 
 ################################################################################
 #function for a binary cito multi-species model evaluation
@@ -124,8 +221,19 @@ evaluate_model_fixed_threshold <- function(model,
     return(NULL)
   }
 }
-
-
+################################################################################
+#function to evaluate a generalized linear model with leave one out cross validation
+leave_one_out_cv <- function(formula="mean_AUC~", data_fr=configurations){
+  RMSE <-c()
+  for (i in 1:nrow(data_fr)) {
+    train_data <- data_fr[-i,]
+    model <- glm(formula, data = train_data)
+    RMSE <- c(RMSE, (predict(model, data_fr[i,])-data_fr$mean_AUC[i])^2)
+    
+  }
+  return(sqrt(sum(RMSE)/nrow(data_fr)))
+}
+################################################################################
 # Helper function to extract species-specific thresholds aggregated across CV folds.
 # Takes a CV model object (as returned by cross_validate_ann) and returns
 # the median threshold per species across all folds.
@@ -162,19 +270,19 @@ cross_validate_ann <- function(model_configs, predictor_set, response_set, cv_fo
     model <- dnn(X=train_pred, 
                  Y=cbind(train_resp),
                  validation = 0.1,
-                 early_stopping = 15,
-                 epochs = 200,
+                 early_stopping = 10,
                  activation = "prelu",
                  lr_scheduler = config_lr_scheduler("reduce_on_plateau", 
                                                     patience = 5, factor = 0.5),
                  #model specific configurations
                  loss = model_configs$loss,
+                 epochs = model_configs$epochs,
                  lr = model_configs$lr,
                  hidden = model_configs$hidden,
                  batchsize = model_configs$batchsize,
                  lambda = model_configs$lambda,
                  alpha = model_configs$alpha)
-    analyze_training(model)
+    
     #check if training was successful
     if (model$successfull){
       #save the folds model
@@ -336,19 +444,6 @@ predict_mvp_manual <- function(X, model, species_names) {
   colnames(probs) <- species_names
   return(probs)
 }
-
-#verify that manual predict function gives the same results as cito's own predict function
-pred_dataset <- read.csv("results/community_analysis/predicted_community_mvp.csv", row.names = 1)
-mvp_ann <- readRDS("results/final_trained_models/mvp_ann")
-
-for (x in 1:100) {
-  manual_pred <- predict_mvp_manual(train_set_predictors[x,], mvp_ann, species_names = species_names)
-  cito_pred <- unlist(pred_dataset[x,])
-  
-  print(mean((manual_pred-cito_pred)**2))
-}
-
-
 
 #function to predict probabilities of species compositions (for single locations!!!)
 #composition should be a vector of length 25:
